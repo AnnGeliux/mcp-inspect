@@ -12,12 +12,124 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import { createRequire } from 'module';
 import { StdioProxy } from './proxy';
 import { McpClientController } from './mcpClient';
-import { LogEntry, ServerConfig, SessionExport, JsonRpcMessage } from '../shared/types';
+import { LogEntry, ServerConfig, SessionExport, JsonRpcMessage, SavedServer, SavedClient } from '../shared/types';
 
 const nodeRequire = createRequire(__filename);
+
+// ——— Persistence paths ————————————————————————————————————————————
+const CONFIG_DIR = path.join(os.homedir(), '.mcp-inspector');
+const SERVERS_FILE = path.join(CONFIG_DIR, 'servers.json');
+const CLIENTS_FILE = path.join(CONFIG_DIR, 'clients.json');
+
+// ——— Presets (pre-loaded servers/clients) ——————————————————————————
+function defaultServers(everythingPath: string): SavedServer[] {
+  return [
+    {
+      id: 'preset-everything',
+      name: 'everything-server (MCP real)',
+      preset: true,
+      config: {
+        command: process.execPath,
+        args: [everythingPath],
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+        connectClient: true,
+      },
+    },
+    {
+      id: 'preset-echo',
+      name: 'echo (test)',
+      preset: true,
+      config: {
+        command: 'node',
+        args: ['-e', "process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{const m=JSON.parse(d.trim());if(m.id)console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{ok:true}}));else if(m.method)console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/message',params:{level:'info',data:m.method}}));});"],
+        connectClient: false,
+      },
+    },
+    {
+      id: 'preset-echo-crlf',
+      name: 'echo CRLF (test)',
+      preset: true,
+      config: {
+        command: 'node',
+        args: ['-e', "process.stdin.setEncoding('utf8');let b='';process.stdin.on('data',d=>{b+=d;let n;while((n=b.indexOf('\\\\n'))>=0){const line=b.slice(0,n).replace(/\\\\r$/,'');b=b.slice(n+1);const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{echo:m.method}})+'\\\\r\\\\n');}});"],
+        connectClient: false,
+      },
+    },
+  ];
+}
+
+function defaultClients(): SavedClient[] {
+  return [
+    {
+      id: 'preset-sdk',
+      name: 'SDK Client (@modelcontextprotocol/sdk)',
+      preset: true,
+      config: {
+        type: 'sdk',
+        name: 'mcp-inspector-client',
+        command: 'node',
+        args: [],
+      },
+    },
+    {
+      id: 'preset-inspector',
+      name: 'Inspector oficial',
+      preset: true,
+      config: {
+        type: 'inspector',
+        name: 'mcp-inspector-official',
+        command: 'npx',
+        args: ['@modelcontextprotocol/inspector'],
+      },
+    },
+  ];
+}
+
+async function ensureConfigDir(): Promise<void> {
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+}
+
+async function loadServers(everythingPath: string): Promise<SavedServer[]> {
+  try {
+    const text = await fs.readFile(SERVERS_FILE, 'utf8');
+    const userServers = JSON.parse(text) as SavedServer[];
+    const presets = defaultServers(everythingPath);
+    // Merge: presets first, then user-added (non-preset) servers
+    const userOnly = userServers.filter((s) => !s.preset);
+    return [...presets, ...userOnly];
+  } catch {
+    return defaultServers(everythingPath);
+  }
+}
+
+async function saveServers(servers: SavedServer[]): Promise<void> {
+  await ensureConfigDir();
+  // Only persist user-added servers (presets are always re-derived)
+  const userServers = servers.filter((s) => !s.preset);
+  await fs.writeFile(SERVERS_FILE, JSON.stringify(userServers, null, 2), 'utf8');
+}
+
+async function loadClients(): Promise<SavedClient[]> {
+  try {
+    const text = await fs.readFile(CLIENTS_FILE, 'utf8');
+    const userClients = JSON.parse(text) as SavedClient[];
+    const presets = defaultClients();
+    const userOnly = userClients.filter((c) => !c.preset);
+    return [...presets, ...userOnly];
+  } catch {
+    return defaultClients();
+  }
+}
+
+async function saveClients(clients: SavedClient[]): Promise<void> {
+  await ensureConfigDir();
+  const userClients = clients.filter((c) => !c.preset);
+  await fs.writeFile(CLIENTS_FILE, JSON.stringify(userClients, null, 2), 'utf8');
+}
 
 let mainWindow: BrowserWindow | null = null;
 const proxy = new StdioProxy();
@@ -188,23 +300,32 @@ ipcMain.handle('proxy:status', async () => {
   return { running: proxy.running, count: sessionEntries.length };
 });
 
-// Presets con paths absolutos resueltos desde node_modules del proyecto
-ipcMain.handle('presets:list', async () => {
-  let everythingPath: string;
-  try {
-    everythingPath = nodeRequire.resolve('@modelcontextprotocol/server-everything/dist/index.js');
-  } catch {
-    everythingPath = '';
-  }
-  return {
-    everything: {
-      // electron.exe como Node puro — robusto sin depender del PATH del user
-      command: process.execPath,
-      args: [everythingPath],
-      env: { ELECTRON_RUN_AS_NODE: '1' },
-      connectClient: true,
-    } as ServerConfig,
-  };
+// Resolve everything-server path (used by presets)
+let everythingPath = '';
+try {
+  everythingPath = nodeRequire.resolve('@modelcontextprotocol/server-everything/dist/index.js');
+} catch {
+  everythingPath = '';
+}
+
+// ——— Persistence IPC handlers ————————————————————————————————
+
+ipcMain.handle('servers:load', async () => {
+  return loadServers(everythingPath);
+});
+
+ipcMain.handle('servers:save', async (_evt, servers: SavedServer[]) => {
+  await saveServers(servers);
+  return { ok: true };
+});
+
+ipcMain.handle('clients:load', async () => {
+  return loadClients();
+});
+
+ipcMain.handle('clients:save', async (_evt, clients: SavedClient[]) => {
+  await saveClients(clients);
+  return { ok: true };
 });
 
 ipcMain.handle('session:export', async () => {

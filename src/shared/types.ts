@@ -79,6 +79,44 @@ export interface ServerConfig {
   connectClient?: boolean;
 }
 
+/** Config de un cliente MCP guardado. */
+export interface ClientConfig {
+  /** Tipo de cliente: 'sdk' = SDK oficial, 'inspector' = inspector official CLI. */
+  type: 'sdk' | 'inspector';
+  /** Nombre descriptivo. */
+  name: string;
+  /** Comando a ejecutar (ej. "npx"). */
+  command: string;
+  /** Args (ej. ["@modelcontextprotocol/inspector"]). */
+  args: string[];
+  /** Env vars extra. */
+  env?: Record<string, string>;
+}
+
+/** Un MCP server guardado (persistible). */
+export interface SavedServer {
+  /** ID único (uuid o timestamp). */
+  id: string;
+  /** Nombre descriptivo. */
+  name: string;
+  /** Config de spawn. */
+  config: ServerConfig;
+  /** Si true, es un preset que no se puede borrar. */
+  preset?: boolean;
+}
+
+/** Un MCP client guardado (persistible). */
+export interface SavedClient {
+  /** ID único (uuid o timestamp). */
+  id: string;
+  /** Nombre descriptivo. */
+  name: string;
+  /** Config del cliente. */
+  config: ClientConfig;
+  /** Si true, es un preset que no se puede borrar. */
+  preset?: boolean;
+}
+
 /** Estado de sesión exportable. */
 export interface SessionExport {
   version: 1;

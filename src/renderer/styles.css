@@ -104,3 +104,51 @@ input, textarea { font-family: inherit; }
   margin: 0;
   color: var(--text);
 }
+
+/* ——— Dropdown selectors ——— */
+.dropdown {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b949e' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+.dropdown:hover:not(:disabled) { border-color: var(--border-strong); }
+.dropdown:focus { outline: none; border-color: var(--accent); }
+.dropdown:disabled { opacity: 0.5; cursor: not-allowed; }
+.dropdown option { background: var(--bg-soft); color: var(--text); }
+
+/* ——— CRUD buttons row ——— */
+.crud-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.btn.small {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.btn.danger-text {
+  color: var(--red);
+  border-color: rgba(248, 81, 73, 0.3);
+}
+.btn.danger-text:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: var(--red);
+}
+
+/* ——— Edit form ——— */
+.edit-form {
+  border-color: var(--accent) !important;
+  background: var(--bg-soft) !important;
+}

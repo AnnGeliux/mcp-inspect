@@ -2,7 +2,14 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ServerPanel from './components/ServerPanel';
 import ClientPanel from './components/ClientPanel';
 import LogList from './components/LogList';
-import { LogEntry, ServerConfig, JsonRpcMessage } from '../shared/types';
+import {
+  LogEntry,
+  ServerConfig,
+  ClientConfig,
+  JsonRpcMessage,
+  SavedServer,
+  SavedClient,
+} from '../shared/types';
 
 // Tipo del bridge expuesto por preload.ts via contextBridge.
 declare global {
@@ -17,7 +24,10 @@ declare global {
       clientStatus(): Promise<{ connected: boolean; server: { name?: string; version?: string; capabilities?: unknown } | null }>;
       exportSession(): Promise<{ ok: boolean; filePath?: string; error?: string }>;
       importSession(): Promise<{ ok: boolean; count?: number; error?: string }>;
-      presets(): Promise<{ everything: ServerConfig }>;
+      loadServers(): Promise<SavedServer[]>;
+      saveServers(servers: SavedServer[]): Promise<{ ok: boolean }>;
+      loadClients(): Promise<SavedClient[]>;
+      saveClients(clients: SavedClient[]): Promise<{ ok: boolean }>;
       onEntry(cb: (e: LogEntry) => void): () => void;
       onExit(cb: (info: { code: number | null; signal: string | null }) => void): () => void;
       onError(cb: (info: { message: string }) => void): () => void;
@@ -28,34 +38,49 @@ declare global {
   }
 }
 
-/** Server MCP real: everything-server oficial (tools + resources + prompts). */
-const DEFAULT_CONFIG: ServerConfig = {
-  command: '',
-  args: [],
-};
-
 export default function App(): React.ReactElement {
+  // ——— Traffic / session state ———
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [clientConnected, setClientConnected] = useState(false);
   const [serverInfo, setServerInfo] = useState<{ name?: string; version?: string; capabilities?: unknown } | null>(null);
   const [lastToolResult, setLastToolResult] = useState<LogEntry | null>(null);
   const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null);
-  const [config, setConfig] = useState<ServerConfig>(DEFAULT_CONFIG);
-  const [everythingPreset, setEverythingPreset] = useState<ServerConfig | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string>('Listo. Presiona Start para spawn del server + handshake del cliente.');
+  const [statusMsg, setStatusMsg] = useState<string>('Listo. Selecciona un server y un client.');
 
-  // Cargar presets del main (paths absolutos a los servers de node_modules)
+  // ——— Persisted servers/clients ———
+  const [servers, setServers] = useState<SavedServer[]>([]);
+  const [clients, setClients] = useState<SavedClient[]>([]);
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+
+  // Config editable del server seleccionado (live in the panel)
+  const [config, setConfig] = useState<ServerConfig>({ command: '', args: [] });
+
+  const hasSelection = selectedServerId !== null && selectedClientId !== null;
+  const autoStarted = useRef(false);
+
+  // ——— Load persisted servers/clients on mount ———
   useEffect(() => {
-    void window.api.presets().then((p) => {
-      if (p.everything.args[0]) {
-        setEverythingPreset(p.everything);
-        setConfig(p.everything);
+    void (async () => {
+      const [loadedServers, loadedClients] = await Promise.all([
+        window.api.loadServers(),
+        window.api.loadClients(),
+      ]);
+      setServers(loadedServers);
+      setClients(loadedClients);
+      // Auto-select first server and first client
+      if (loadedServers.length > 0) {
+        setSelectedServerId(loadedServers[0]!.id);
+        setConfig(loadedServers[0]!.config);
       }
-    });
+      if (loadedClients.length > 0) {
+        setSelectedClientId(loadedClients[0]!.id);
+      }
+    })();
   }, []);
 
-  // Suscripciones a eventos IPC del main process
+  // ——— IPC event subscriptions ———
   useEffect(() => {
     const offEntry = window.api.onEntry((e) => setEntries((prev) => [...prev, e]));
     const offExit = window.api.onExit((info) => {
@@ -68,7 +93,6 @@ export default function App(): React.ReactElement {
     const offConn = window.api.onClientConnected((info) => {
       setClientConnected(true);
       setStatusMsg(`Cliente conectado a ${info.serverName} v${info.serverVersion} — handshake completo.`);
-      // refrescar info del server (capabilities) desde el main
       void window.api.clientStatus().then((s) => setServerInfo(s.server));
     });
     const offClosed = window.api.onClientClosed(() => {
@@ -81,6 +105,93 @@ export default function App(): React.ReactElement {
     };
   }, []);
 
+  // ——— Server CRUD ———
+  const handleSelectServer = useCallback((id: string) => {
+    const s = servers.find((srv) => srv.id === id);
+    if (s) {
+      setSelectedServerId(id);
+      setConfig(s.config);
+      // Reset auto-start so new selection can auto-start
+      autoStarted.current = false;
+    }
+  }, [servers]);
+
+  const handleAddServer = useCallback((name: string, newConfig: ServerConfig) => {
+    const id = `server-${Date.now()}`;
+    const newServer: SavedServer = { id, name, config: newConfig };
+    setServers((prev) => {
+      const updated = [...prev, newServer];
+      void window.api.saveServers(updated);
+      return updated;
+    });
+    setSelectedServerId(id);
+    setConfig(newConfig);
+  }, []);
+
+  const handleUpdateServer = useCallback((id: string, name: string, newConfig: ServerConfig) => {
+    setServers((prev) => {
+      const updated = prev.map((s) =>
+        s.id === id ? { ...s, name, config: newConfig } : s,
+      );
+      void window.api.saveServers(updated);
+      return updated;
+    });
+    if (selectedServerId === id) {
+      setConfig(newConfig);
+    }
+  }, [selectedServerId]);
+
+  const handleDeleteServer = useCallback((id: string) => {
+    setServers((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      void window.api.saveServers(updated);
+      return updated;
+    });
+    if (selectedServerId === id) {
+      setSelectedServerId(null);
+      setConfig({ command: '', args: [] });
+    }
+  }, [selectedServerId]);
+
+  // ——— Client CRUD ———
+  const handleSelectClient = useCallback((id: string) => {
+    setSelectedClientId(id);
+    autoStarted.current = false;
+  }, []);
+
+  const handleAddClient = useCallback((name: string, clientConfig: ClientConfig) => {
+    const id = `client-${Date.now()}`;
+    const newClient: SavedClient = { id, name, config: clientConfig };
+    setClients((prev) => {
+      const updated = [...prev, newClient];
+      void window.api.saveClients(updated);
+      return updated;
+    });
+    setSelectedClientId(id);
+  }, []);
+
+  const handleUpdateClient = useCallback((id: string, name: string, clientConfig: ClientConfig) => {
+    setClients((prev) => {
+      const updated = prev.map((c) =>
+        c.id === id ? { ...c, name, config: clientConfig } : c,
+      );
+      void window.api.saveClients(updated);
+      return updated;
+    });
+  }, []);
+
+  const handleDeleteClient = useCallback((id: string) => {
+    setClients((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      void window.api.saveClients(updated);
+      return updated;
+    });
+    if (selectedClientId === id) {
+      setSelectedClientId(null);
+    }
+  }, [selectedClientId]);
+
+  // ——— Start / Stop ———
   const onStart = useCallback(async () => {
     setEntries([]);
     setExitInfo(null);
@@ -97,24 +208,25 @@ export default function App(): React.ReactElement {
     await window.api.stop();
   }, []);
 
-  // Auto-start (una sola vez): con el preset real cargado, spawn del server
-  // + handshake del cliente inmediato — la interacción se ve al abrir la app.
-  const autoStarted = useRef(false);
+  // Auto-start when both server + client are selected (once)
   useEffect(() => {
-    if (!autoStarted.current && config.args.length > 0 && !running) {
+    if (
+      !autoStarted.current &&
+      hasSelection &&
+      config.args.length > 0 &&
+      !running
+    ) {
       autoStarted.current = true;
       void onStart();
     }
-  }, [config, running, onStart]);
+  }, [hasSelection, config, running, onStart]);
 
-  // ——— interacción cliente → server ———
-
+  // ——— Client → server interaction ———
   const doRequest = useCallback(async (method: string, params?: unknown, label?: string) => {
     setStatusMsg(`Enviando ${label ?? method}…`);
     const r = await window.api.clientRequest(method, params);
     if (r.ok) {
       setStatusMsg(`${label ?? method} OK — respuesta en el log.`);
-      // mostrar result compacto en panel de cliente
       setLastToolResult({
         seq: -1, ts: new Date().toISOString(), dir: 's2c', kind: 'response',
         rpcId: null, method: label ?? method, result: r.result, raw: JSON.stringify(r.result),
@@ -172,18 +284,30 @@ export default function App(): React.ReactElement {
       </header>
       <div className="middle">
         <ServerPanel
+          servers={servers}
+          selectedId={selectedServerId}
           config={config}
+          onSelect={handleSelectServer}
           onChange={setConfig}
+          onAdd={handleAddServer}
+          onUpdate={handleUpdateServer}
+          onDelete={handleDeleteServer}
           running={running}
           onStart={onStart}
           onStop={onStop}
-          everythingPreset={everythingPreset}
         />
         <LogList entries={entries} />
         <ClientPanel
+          clients={clients}
+          selectedClientId={selectedClientId}
+          onSelectClient={handleSelectClient}
+          onAddClient={handleAddClient}
+          onUpdateClient={handleUpdateClient}
+          onDeleteClient={handleDeleteClient}
           clientConnected={clientConnected}
           serverInfo={serverInfo}
           lastToolResult={lastToolResult}
+          hasSelection={hasSelection}
           onPing={onPing}
           onListTools={onListTools}
           onCallEcho={onCallEcho}

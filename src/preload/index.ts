@@ -3,7 +3,7 @@
  * contextIsolation: true → no podemos compartir variables, solo via window.api.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import { LogEntry, ServerConfig, JsonRpcMessage } from '../shared/types';
+import { LogEntry, ServerConfig, JsonRpcMessage, SavedServer, SavedClient } from '../shared/types';
 
 const api = {
   // ——— proxy (server subprocess) ———
@@ -23,8 +23,11 @@ const api = {
   exportSession: () => ipcRenderer.invoke('session:export'),
   importSession: () => ipcRenderer.invoke('session:import'),
 
-  // ——— presets (paths absolutos desde el main) ———
-  presets: () => ipcRenderer.invoke('presets:list'),
+  // ——— persistencia de servers/clients ———
+  loadServers: () => ipcRenderer.invoke('servers:load') as Promise<SavedServer[]>,
+  saveServers: (servers: SavedServer[]) => ipcRenderer.invoke('servers:save', servers) as Promise<{ ok: boolean }>,
+  loadClients: () => ipcRenderer.invoke('clients:load') as Promise<SavedClient[]>,
+  saveClients: (clients: SavedClient[]) => ipcRenderer.invoke('clients:save', clients) as Promise<{ ok: boolean }>,
 
   // ——— eventos push ———
   onEntry: (cb: (e: LogEntry) => void) => {
