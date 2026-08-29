@@ -1,5 +1,6 @@
 import React from 'react';
 import { SavedServer } from '../../shared/types';
+import { truncateMiddle, serverTypeBadge } from '../utils/format';
 
 interface Props {
   server: SavedServer;
@@ -26,13 +27,19 @@ function serverIcon(server: SavedServer): string {
   return '📡';
 }
 
-/** Descripción corta derivada del comando. */
+/**
+ * Description for the card. Priority:
+ * 1. Explicit description field
+ * 2. Truncated command (not raw path)
+ */
 function serverDesc(server: SavedServer): string {
+  if (server.description && server.description.trim()) {
+    return server.description.trim();
+  }
   const cmd = server.config.command;
   const args = server.config.args ?? [];
   const full = [cmd, ...args].join(' ');
-  if (full.length > 50) return full.slice(0, 47) + '…';
-  return full || '—';
+  return truncateMiddle(full, 50) || '—';
 }
 
 export default function ServerCard({
@@ -51,6 +58,8 @@ export default function ServerCard({
       ? { text: 'preset', cls: 'badge-preset' }
       : { text: 'idle', cls: 'badge-idle' };
 
+  const typeBadge = serverTypeBadge(server.config);
+
   return (
     <div
       className={`card ${selected ? 'card-selected' : ''} ${disabled ? 'card-disabled' : ''}`}
@@ -64,6 +73,9 @@ export default function ServerCard({
           <span className="card-desc">{serverDesc(server)}</span>
         </div>
         <span className={`card-badge ${statusBadge.cls}`}>{statusBadge.text}</span>
+      </div>
+      <div className="card-badges-row">
+        <span className="card-type-badge">{typeBadge}</span>
       </div>
       {!disabled && (
         <div className="card-actions">

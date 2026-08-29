@@ -258,6 +258,98 @@ input, textarea, select { font-family: inherit; }
 /* Edit form */
 .edit-form { border-color: var(--accent) !important; background: var(--bg-soft) !important; }
 
+/* Form label (replaces .label in edit form context) */
+.form-label {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  margin-bottom: var(--sp-2);
+}
+
+/* Form field with label */
+.form-field-label {
+  font-size: 11px; text-transform: uppercase; color: var(--text-dim);
+  letter-spacing: 0.05em; margin-bottom: var(--sp-1); display: block;
+}
+
+/* Checkbox row in form */
+.form-checkbox-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: 12px; color: var(--text); cursor: pointer;
+}
+.form-checkbox-row input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ——— Advanced toggle button ——— */
+.advanced-toggle {
+  width: 100%; background: var(--bg); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 6px var(--sp-3); font-size: 12px; font-weight: 500;
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin-top: var(--sp-2); margin-bottom: 0;
+  transition: all var(--t-fast);
+}
+.advanced-toggle:hover {
+  color: var(--text); border-color: var(--border-strong);
+  background: var(--bg-card);
+}
+.advanced-toggle.expanded {
+  color: var(--accent); border-color: var(--accent);
+  background: var(--accent-soft);
+  margin-bottom: 0;
+}
+.advanced-toggle-icon {
+  font-size: 10px; flex-shrink: 0;
+}
+
+/* ——— Collapsible section (slide-down animation) ——— */
+.form-section-advanced {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height var(--t-slow) ease, opacity var(--t-normal) ease;
+}
+.form-section-advanced.expanded {
+  max-height: 600px;
+  opacity: 1;
+}
+.form-section-advanced.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+.form-section-advanced-inner {
+  padding-top: var(--sp-2);
+}
+
+/* ——— Command preview (readonly, monospace, surface bg) ——— */
+.cmd-preview {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cmd-preview-label {
+  font-size: 10px; text-transform: uppercase; color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+.cmd-preview-code {
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+  word-break: break-all; white-space: pre-wrap;
+}
+
+/* ——— Card type badge ——— */
+.card-badges-row {
+  display: flex; gap: var(--sp-1); margin-top: var(--sp-1);
+  padding-left: 32px; /* align with card-info (icon width + gap) */
+}
+.card-type-badge {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--bg-soft); color: var(--text-dim);
+  border: 1px solid var(--border);
+  letter-spacing: 0.04em;
+  font-family: var(--mono);
+}
+
 /* Role tag */
 .role-tag {
   margin-left: auto; font-family: var(--mono); font-size: 10px;

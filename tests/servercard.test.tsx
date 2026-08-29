@@ -67,7 +67,8 @@ test('ServerCard: truncates long command descriptions', () => {
   const descEl = container.querySelector('.card-desc');
   assert.ok(descEl, 'should have a card-desc element');
   const desc = text(descEl);
-  assert.ok(desc.endsWith('…'), 'long description should end with ellipsis');
+  assert.ok(desc.includes('…') || desc.includes('...'), 'long description should contain ellipsis');
+  assert.ok(desc.length < 60, 'truncated description should be shorter than 60 chars');
   cleanup();
 });
 
@@ -164,6 +165,32 @@ test('ServerCard: shows edit button for presets too', () => {
   );
   const editBtn = container.querySelector('.card-action-btn[title="Editar"]') as HTMLElement;
   assert.ok(editBtn, 'presets should still have an edit button');
+  cleanup();
+});
+
+test('ServerCard: uses description field when available', () => {
+  const descServer: SavedServer = {
+    id: 's-desc',
+    name: 'My Server',
+    description: 'A custom description',
+    config: { command: 'npx', args: ['some-pkg'] },
+  };
+  const { container, cleanup } = render(
+    React.createElement(ServerCard, { server: descServer, selected: false, running: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
+  );
+  const descEl = container.querySelector('.card-desc');
+  assert.ok(descEl, 'should have a card-desc element');
+  assert.equal(text(descEl), 'A custom description');
+  cleanup();
+});
+
+test('ServerCard: shows type badge', () => {
+  const { container, cleanup } = render(
+    React.createElement(ServerCard, { server: customServer, selected: false, running: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
+  );
+  const typeBadge = container.querySelector('.card-type-badge');
+  assert.ok(typeBadge, 'should have a card-type-badge element');
+  assert.equal(text(typeBadge), 'stdio');
   cleanup();
 });
 

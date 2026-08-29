@@ -131,9 +131,9 @@ export default function App(): React.ReactElement {
     }
   }, [servers, showWizard, wizardStep]);
 
-  const handleAddServer = useCallback((name: string, newConfig: ServerConfig) => {
+  const handleAddServer = useCallback((name: string, newConfig: ServerConfig, description?: string) => {
     const id = `server-${Date.now()}`;
-    const newServer: SavedServer = { id, name, config: newConfig };
+    const newServer: SavedServer = { id, name, description, config: newConfig };
     setServers((prev) => {
       const updated = [...prev, newServer];
       void window.api.saveServers(updated);
@@ -147,10 +147,10 @@ export default function App(): React.ReactElement {
     }
   }, [showWizard, wizardStep]);
 
-  const handleUpdateServer = useCallback((id: string, name: string, newConfig: ServerConfig) => {
+  const handleUpdateServer = useCallback((id: string, name: string, newConfig: ServerConfig, description?: string) => {
     setServers((prev) => {
       const updated = prev.map((s) =>
-        s.id === id ? { ...s, name, config: newConfig } : s,
+        s.id === id ? { ...s, name, description, config: newConfig } : s,
       );
       void window.api.saveServers(updated);
       return updated;
@@ -182,9 +182,9 @@ export default function App(): React.ReactElement {
     }
   }, [showWizard]);
 
-  const handleAddClient = useCallback((name: string, clientConfig: ClientConfig) => {
+  const handleAddClient = useCallback((name: string, clientConfig: ClientConfig, description?: string) => {
     const id = `client-${Date.now()}`;
-    const newClient: SavedClient = { id, name, config: clientConfig };
+    const newClient: SavedClient = { id, name, description, config: clientConfig };
     setClients((prev) => {
       const updated = [...prev, newClient];
       void window.api.saveClients(updated);
@@ -196,10 +196,10 @@ export default function App(): React.ReactElement {
     }
   }, [showWizard]);
 
-  const handleUpdateClient = useCallback((id: string, name: string, clientConfig: ClientConfig) => {
+  const handleUpdateClient = useCallback((id: string, name: string, clientConfig: ClientConfig, description?: string) => {
     setClients((prev) => {
       const updated = prev.map((c) =>
-        c.id === id ? { ...c, name, config: clientConfig } : c,
+        c.id === id ? { ...c, name, description, config: clientConfig } : c,
       );
       void window.api.saveClients(updated);
       return updated;

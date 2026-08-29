@@ -200,3 +200,39 @@ test('ClientCard: generic client shows default 🧑‍💻 icon', () => {
   assert.equal(text(icon), '🧑‍💻', 'generic client should show 🧑‍💻 icon');
   cleanup();
 });
+
+test('ClientCard: uses description field when available', () => {
+  const descClient: SavedClient = {
+    id: 'c-desc',
+    name: 'My Client',
+    description: 'A custom client description',
+    config: { type: 'sdk', name: 'custom', command: 'node', args: [] },
+  };
+  const { container, cleanup } = render(
+    React.createElement(ClientCard, { client: descClient, selected: false, connected: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
+  );
+  const descEl = container.querySelector('.card-desc');
+  assert.ok(descEl, 'should have a card-desc element');
+  assert.equal(text(descEl), 'A custom client description');
+  cleanup();
+});
+
+test('ClientCard: shows type badge', () => {
+  const { container, cleanup } = render(
+    React.createElement(ClientCard, { client: customClient, selected: false, connected: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
+  );
+  const typeBadge = container.querySelector('.card-type-badge');
+  assert.ok(typeBadge, 'should have a card-type-badge element');
+  assert.equal(text(typeBadge), 'sdk');
+  cleanup();
+});
+
+test('ClientCard: inspector type badge', () => {
+  const { container, cleanup } = render(
+    React.createElement(ClientCard, { client: inspectorClient, selected: false, connected: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
+  );
+  const typeBadge = container.querySelector('.card-type-badge');
+  assert.ok(typeBadge, 'should have a card-type-badge element');
+  assert.equal(text(typeBadge), 'inspector');
+  cleanup();
+});

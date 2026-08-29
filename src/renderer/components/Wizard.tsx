@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SavedServer, SavedClient, ServerConfig, ClientConfig } from '../../shared/types';
 import ServerCard from './ServerCard';
 import ClientCard from './ClientCard';
+import { truncateMiddle, envToText, textToEnv, buildCommandPreview } from '../utils/format';
 
 interface Props {
   step: 1 | 2;
@@ -13,8 +14,8 @@ interface Props {
   clientConnected: boolean;
   onSelectServer: (id: string) => void;
   onSelectClient: (id: string) => void;
-  onAddServer: (name: string, config: ServerConfig) => void;
-  onAddClient: (name: string, config: ClientConfig) => void;
+  onAddServer: (name: string, config: ServerConfig, description?: string) => void;
+  onAddClient: (name: string, config: ClientConfig, description?: string) => void;
   onAdvance: () => void;
   onBack: () => void;
 }
@@ -100,7 +101,7 @@ interface ServerStepProps {
   selectedServerId: string | null;
   running: boolean;
   onSelect: (id: string) => void;
-  onAdd: (name: string, config: ServerConfig) => void;
+  onAdd: (name: string, config: ServerConfig, description?: string) => void;
   showAddForm: boolean;
   setShowAddForm: (v: boolean) => void;
 }
@@ -108,15 +109,19 @@ interface ServerStepProps {
 function ServerStep(props: ServerStepProps): React.ReactElement {
   const { servers, selectedServerId, running, onSelect, onAdd, showAddForm, setShowAddForm } = props;
   const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const save = () => {
     const argList = args.split('\n').filter((s) => s.length > 0);
-    onAdd(name, { command, args: argList });
+    onAdd(name, { command, args: argList }, desc.trim() || undefined);
     setShowAddForm(false);
-    setName(''); setCommand(''); setArgs('');
+    setName(''); setDesc(''); setCommand(''); setArgs(''); setShowAdvanced(false);
   };
+
+  const basicPreview = [command, ...args.split('\n').filter((s) => s.length > 0)].filter(Boolean).join(' ');
 
   return (
     <div className="wizard-step">
@@ -145,7 +150,25 @@ function ServerStep(props: ServerStepProps): React.ReactElement {
         <div className="wizard-add-form">
           <input className="cmd-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre descriptivo" />
           <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-          <textarea className="cmd-input args" style={{ marginTop: 8 }} value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+          <div className="cmd-preview" style={{ marginTop: 8 }}>
+            <span className="cmd-preview-label">Preview</span>
+            <code className="cmd-preview-code">{basicPreview || '—'}</code>
+          </div>
+          <button
+            className={`advanced-toggle ${showAdvanced ? 'expanded' : ''}`}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            type="button"
+            style={{ marginTop: 8 }}
+          >
+            <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
+            <span>⚙ Avanzado</span>
+          </button>
+          <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
+            <div className="form-section-advanced-inner">
+              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+            </div>
+          </div>
           <div className="crud-row" style={{ marginTop: 8 }}>
             <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Guardar</button>
             <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancelar</button>
@@ -163,7 +186,7 @@ interface ClientStepProps {
   selectedClientId: string | null;
   clientConnected: boolean;
   onSelect: (id: string) => void;
-  onAdd: (name: string, config: ClientConfig) => void;
+  onAdd: (name: string, config: ClientConfig, description?: string) => void;
   showAddForm: boolean;
   setShowAddForm: (v: boolean) => void;
 }
@@ -171,16 +194,20 @@ interface ClientStepProps {
 function ClientStep(props: ClientStepProps): React.ReactElement {
   const { clients, selectedClientId, clientConnected, onSelect, onAdd, showAddForm, setShowAddForm } = props;
   const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
   const [type, setType] = useState<'sdk' | 'inspector'>('sdk');
   const [command, setCommand] = useState('node');
   const [args, setArgs] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const save = () => {
     const argList = args.split('\n').filter((s) => s.length > 0);
-    onAdd(name, { type, name, command, args: argList });
+    onAdd(name, { type, name, command, args: argList }, desc.trim() || undefined);
     setShowAddForm(false);
-    setName(''); setCommand('node'); setArgs('');
+    setName(''); setDesc(''); setCommand('node'); setArgs(''); setShowAdvanced(false);
   };
+
+  const basicPreview = [command, ...args.split('\n').filter((s) => s.length > 0)].filter(Boolean).join(' ');
 
   return (
     <div className="wizard-step">
@@ -213,7 +240,25 @@ function ClientStep(props: ClientStepProps): React.ReactElement {
             <option value="inspector">Inspector oficial</option>
           </select>
           <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-          <textarea className="cmd-input args" style={{ marginTop: 8 }} value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+          <div className="cmd-preview" style={{ marginTop: 8 }}>
+            <span className="cmd-preview-label">Preview</span>
+            <code className="cmd-preview-code">{basicPreview || '—'}</code>
+          </div>
+          <button
+            className={`advanced-toggle ${showAdvanced ? 'expanded' : ''}`}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            type="button"
+            style={{ marginTop: 8 }}
+          >
+            <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
+            <span>⚙ Avanzado</span>
+          </button>
+          <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
+            <div className="form-section-advanced-inner">
+              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+            </div>
+          </div>
           <div className="crud-row" style={{ marginTop: 8 }}>
             <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Guardar</button>
             <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancelar</button>

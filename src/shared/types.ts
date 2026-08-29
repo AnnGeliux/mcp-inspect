@@ -99,6 +99,8 @@ export interface SavedServer {
   id: string;
   /** Nombre descriptivo. */
   name: string;
+  /** Descripción corta opcional para mostrar en la card. */
+  description?: string;
   /** Config de spawn. */
   config: ServerConfig;
   /** Si true, es un preset que no se puede borrar. */
@@ -111,6 +113,8 @@ export interface SavedClient {
   id: string;
   /** Nombre descriptivo. */
   name: string;
+  /** Descripción corta opcional para mostrar en la card. */
+  description?: string;
   /** Config del cliente. */
   config: ClientConfig;
   /** Si true, es un preset que no se puede borrar. */

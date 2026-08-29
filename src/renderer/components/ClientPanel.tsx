@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { LogEntry, ClientConfig, SavedClient } from '../../shared/types';
 import ClientCard from './ClientCard';
 import JsonHighlight from './JsonHighlight';
+import { truncateMiddle, envToText, textToEnv, buildCommandPreview, clientTypeBadge } from '../utils/format';
 
 interface Props {
   clients: SavedClient[];
   selectedClientId: string | null;
   onSelectClient: (id: string) => void;
-  onAddClient: (name: string, config: ClientConfig) => void;
-  onUpdateClient: (id: string, name: string, config: ClientConfig) => void;
+  onAddClient: (name: string, config: ClientConfig, description?: string) => void;
+  onUpdateClient: (id: string, name: string, config: ClientConfig, description?: string) => void;
   onDeleteClient: (id: string) => void;
   clientConnected: boolean;
   serverInfo: { name?: string; version?: string; capabilities?: unknown } | null;
@@ -49,17 +50,21 @@ export default function ClientPanel(props: Props): React.ReactElement {
   const [rawInput, setRawInput] = useState('');
   const [editMode, setEditMode] = useState<EditMode>('none');
   const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
   const [editType, setEditType] = useState<'sdk' | 'inspector'>('sdk');
   const [editCommand, setEditCommand] = useState('');
   const [editArgs, setEditArgs] = useState('');
+  const [editEnv, setEditEnv] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const selected = clients.find((c) => c.id === selectedClientId) ?? null;
   const caps = serverInfo?.capabilities as Record<string, unknown> | undefined;
   const interactionDisabled = !hasSelection || !clientConnected;
 
   const startAdd = () => {
-    setEditName(''); setEditType('sdk'); setEditCommand('node'); setEditArgs(''); setEditId(null);
+    setEditName(''); setEditDesc(''); setEditType('sdk'); setEditCommand('node'); setEditArgs(''); setEditEnv('');
+    setEditId(null); setShowAdvanced(false);
     setEditMode('add');
   };
 
@@ -67,10 +72,13 @@ export default function ClientPanel(props: Props): React.ReactElement {
     const c = clients.find((cl) => cl.id === id);
     if (!c) return;
     setEditName(c.name);
+    setEditDesc(c.description ?? '');
     setEditType(c.config.type);
     setEditCommand(c.config.command);
     setEditArgs((c.config.args ?? []).join('\n'));
+    setEditEnv(envToText(c.config.env));
     setEditId(id);
+    setShowAdvanced(false);
     setEditMode('edit');
   };
 
@@ -78,11 +86,19 @@ export default function ClientPanel(props: Props): React.ReactElement {
 
   const saveEdit = () => {
     const args = editArgs.split('\n').filter((s) => s.length > 0);
-    const newConfig: ClientConfig = { type: editType, name: editName, command: editCommand, args };
+    const env = textToEnv(editEnv);
+    const newConfig: ClientConfig = {
+      type: editType,
+      name: editName,
+      command: editCommand,
+      args,
+      env: Object.keys(env).length > 0 ? env : undefined,
+    };
+    const desc = editDesc.trim() || undefined;
     if (editMode === 'add') {
-      onAddClient(editName, newConfig);
+      onAddClient(editName, newConfig, desc);
     } else if (editMode === 'edit' && editId) {
-      onUpdateClient(editId, editName, newConfig);
+      onUpdateClient(editId, editName, newConfig, desc);
     }
     setEditMode('none'); setEditId(null);
   };
@@ -92,6 +108,12 @@ export default function ClientPanel(props: Props): React.ReactElement {
     if (!c || c.preset) return;
     onDeleteClient(id);
   };
+
+  // Build live preview for edit form
+  const editArgsList = editArgs.split('\n').filter((s) => s.length > 0);
+  const editEnvRecord = textToEnv(editEnv);
+  const basicPreview = [editCommand, ...editArgsList].filter(Boolean).join(' ');
+  const fullPreview = buildCommandPreview(editCommand, editArgsList, editEnvRecord);
 
   return (
     <section className="panel">
@@ -127,17 +149,60 @@ export default function ClientPanel(props: Props): React.ReactElement {
           </div>
         )}
 
-        {/* Add / Edit form */}
+        {/* Add / Edit form with collapsible sections */}
         {editMode !== 'none' && (
           <div className="endpoint-card edit-form slide-in">
-            <div className="label">{editMode === 'add' ? 'Nuevo client' : 'Editar client'}</div>
-            <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre descriptivo" />
-            <select className="dropdown" style={{ marginTop: 8 }} value={editType} onChange={(e) => setEditType(e.target.value as 'sdk' | 'inspector')}>
-              <option value="sdk">SDK (@modelcontextprotocol/sdk)</option>
-              <option value="inspector">Inspector oficial</option>
-            </select>
-            <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-            <textarea className="cmd-input args" style={{ marginTop: 8 }} value={editArgs} onChange={(e) => setEditArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+            <div className="form-label">{editMode === 'add' ? 'Nuevo client' : 'Editar client'}</div>
+
+            {/* ——— Basic section (always visible) ——— */}
+            <div className="form-section-basic">
+              <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre descriptivo" />
+              <select className="dropdown" style={{ marginTop: 8 }} value={editType} onChange={(e) => setEditType(e.target.value as 'sdk' | 'inspector')}>
+                <option value="sdk">SDK (@modelcontextprotocol/sdk)</option>
+                <option value="inspector">Inspector oficial</option>
+              </select>
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Comando (ej. npx)" />
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+
+              {/* Basic preview */}
+              <div className="cmd-preview" style={{ marginTop: 8 }}>
+                <span className="cmd-preview-label">Preview</span>
+                <code className="cmd-preview-code">{basicPreview || '—'}</code>
+              </div>
+            </div>
+
+            {/* ——— Advanced toggle ——— */}
+            <button
+              className={`advanced-toggle ${showAdvanced ? 'expanded' : ''}`}
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              type="button"
+            >
+              <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
+              <span>⚙ Avanzado</span>
+            </button>
+
+            {/* ——— Advanced section (collapsible) ——— */}
+            <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
+              <div className="form-section-advanced-inner">
+                <div className="form-field">
+                  <label className="form-field-label">Args (uno por línea)</label>
+                  <textarea className="cmd-input args" value={editArgs} onChange={(e) => setEditArgs(e.target.value)} placeholder={'@modelcontextprotocol/inspector'} rows={4} />
+                </div>
+
+                <div className="form-field" style={{ marginTop: 8 }}>
+                  <label className="form-field-label">Variables de entorno (KEY=VALUE, una por línea)</label>
+                  <textarea className="cmd-input args" value={editEnv} onChange={(e) => setEditEnv(e.target.value)} placeholder={'NODE_ENV=development'} rows={3} />
+                </div>
+
+                {/* Full preview (with env + args) */}
+                <div className="cmd-preview" style={{ marginTop: 8 }}>
+                  <span className="cmd-preview-label">Preview completo</span>
+                  <code className="cmd-preview-code">{fullPreview || '—'}</code>
+                </div>
+              </div>
+            </div>
+
+            {/* ——— Action buttons ——— */}
             <div className="crud-row" style={{ marginTop: 8 }}>
               <button className="btn primary small" onClick={saveEdit} disabled={!editName.trim() || !editCommand.trim()}>✓ Guardar</button>
               <button className="btn small" onClick={cancelEdit}>✕ Cancelar</button>

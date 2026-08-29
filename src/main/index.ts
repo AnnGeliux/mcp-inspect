@@ -26,6 +26,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-everything',
       name: 'everything-server (MCP real)',
+      description: 'Server MCP con tools, resources y prompts de prueba',
       preset: true,
       config: {
         command: process.execPath,
@@ -37,6 +38,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-echo',
       name: 'echo (test)',
+      description: 'Server echo simple para testing de mensajes',
       preset: true,
       config: {
         command: 'node',
@@ -47,6 +49,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-echo-crlf',
       name: 'echo CRLF (test)',
+      description: 'Server echo con framing CRLF para testing',
       preset: true,
       config: {
         command: 'node',
@@ -62,6 +65,7 @@ function defaultClients(): SavedClient[] {
     {
       id: 'preset-sdk',
       name: 'SDK Client (@modelcontextprotocol/sdk)',
+      description: 'Cliente MCP oficial con SDK TypeScript',
       preset: true,
       config: {
         type: 'sdk',
@@ -73,6 +77,7 @@ function defaultClients(): SavedClient[] {
     {
       id: 'preset-inspector',
       name: 'Inspector oficial',
+      description: 'Inspector MCP oficial via npx',
       preset: true,
       config: {
         type: 'inspector',

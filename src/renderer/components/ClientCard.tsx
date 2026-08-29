@@ -1,5 +1,6 @@
 import React from 'react';
 import { SavedClient } from '../../shared/types';
+import { truncateMiddle, clientTypeBadge } from '../utils/format';
 
 interface Props {
   client: SavedClient;
@@ -22,11 +23,19 @@ function clientIcon(client: SavedClient): string {
   return '🧑‍💻';
 }
 
+/**
+ * Description for the card. Priority:
+ * 1. Explicit description field
+ * 2. Type + truncated command
+ */
 function clientDesc(client: SavedClient): string {
+  if (client.description && client.description.trim()) {
+    return client.description.trim();
+  }
   const parts: string[] = [client.config.type];
   if (client.config.command) parts.push(client.config.command);
   const desc = parts.join(' · ');
-  return desc.length > 50 ? desc.slice(0, 47) + '…' : desc;
+  return truncateMiddle(desc, 50);
 }
 
 export default function ClientCard({
@@ -45,6 +54,8 @@ export default function ClientCard({
       ? { text: 'preset', cls: 'badge-preset' }
       : { text: 'idle', cls: 'badge-idle' };
 
+  const typeBadge = clientTypeBadge(client.config);
+
   return (
     <div
       className={`card ${selected ? 'card-selected' : ''} ${disabled ? 'card-disabled' : ''}`}
@@ -58,6 +69,9 @@ export default function ClientCard({
           <span className="card-desc">{clientDesc(client)}</span>
         </div>
         <span className={`card-badge ${statusBadge.cls}`}>{statusBadge.text}</span>
+      </div>
+      <div className="card-badges-row">
+        <span className="card-type-badge">{typeBadge}</span>
       </div>
       {!disabled && (
         <div className="card-actions">
