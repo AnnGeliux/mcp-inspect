@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ServerPanel from './components/ServerPanel';
 import ClientPanel from './components/ClientPanel';
 import LogList from './components/LogList';
+import Wizard from './components/Wizard';
 import {
   LogEntry,
   ServerConfig,
@@ -54,7 +55,13 @@ export default function App(): React.ReactElement {
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
-  // Config editable del server seleccionado (live in the panel)
+  // ——— Wizard state ———
+  // Only show wizard when both are null AND it's the initial load (no prior selection)
+  const [wizardStep, setWizardStep] = useState<1 | 2>(1);
+  const [showWizard, setShowWizard] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+
+  // Config editable del server seleccionado
   const [config, setConfig] = useState<ServerConfig>({ command: '', args: [] });
 
   const hasSelection = selectedServerId !== null && selectedClientId !== null;
@@ -69,7 +76,7 @@ export default function App(): React.ReactElement {
       ]);
       setServers(loadedServers);
       setClients(loadedClients);
-      // Auto-select first server and first client
+      // Auto-select first server and first client if available
       if (loadedServers.length > 0) {
         setSelectedServerId(loadedServers[0]!.id);
         setConfig(loadedServers[0]!.config);
@@ -77,6 +84,11 @@ export default function App(): React.ReactElement {
       if (loadedClients.length > 0) {
         setSelectedClientId(loadedClients[0]!.id);
       }
+      // Show wizard only if nothing is pre-selected
+      if (loadedServers.length === 0 && loadedClients.length === 0) {
+        setShowWizard(true);
+      }
+      setInitialized(true);
     })();
   }, []);
 
@@ -111,10 +123,13 @@ export default function App(): React.ReactElement {
     if (s) {
       setSelectedServerId(id);
       setConfig(s.config);
-      // Reset auto-start so new selection can auto-start
       autoStarted.current = false;
+      // If wizard is showing and we're on step 1, advance to step 2
+      if (showWizard && wizardStep === 1) {
+        setWizardStep(2);
+      }
     }
-  }, [servers]);
+  }, [servers, showWizard, wizardStep]);
 
   const handleAddServer = useCallback((name: string, newConfig: ServerConfig) => {
     const id = `server-${Date.now()}`;
@@ -126,7 +141,11 @@ export default function App(): React.ReactElement {
     });
     setSelectedServerId(id);
     setConfig(newConfig);
-  }, []);
+    // In wizard, advance after adding
+    if (showWizard && wizardStep === 1) {
+      setWizardStep(2);
+    }
+  }, [showWizard, wizardStep]);
 
   const handleUpdateServer = useCallback((id: string, name: string, newConfig: ServerConfig) => {
     setServers((prev) => {
@@ -157,7 +176,11 @@ export default function App(): React.ReactElement {
   const handleSelectClient = useCallback((id: string) => {
     setSelectedClientId(id);
     autoStarted.current = false;
-  }, []);
+    // In wizard, selecting a client finishes the wizard
+    if (showWizard) {
+      setShowWizard(false);
+    }
+  }, [showWizard]);
 
   const handleAddClient = useCallback((name: string, clientConfig: ClientConfig) => {
     const id = `client-${Date.now()}`;
@@ -168,7 +191,10 @@ export default function App(): React.ReactElement {
       return updated;
     });
     setSelectedClientId(id);
-  }, []);
+    if (showWizard) {
+      setShowWizard(false);
+    }
+  }, [showWizard]);
 
   const handleUpdateClient = useCallback((id: string, name: string, clientConfig: ClientConfig) => {
     setClients((prev) => {
@@ -187,7 +213,7 @@ export default function App(): React.ReactElement {
       return updated;
     });
     if (selectedClientId === id) {
-      setSelectedClientId(null);
+      setSelectedClientId(id === selectedClientId ? null : selectedClientId);
     }
   }, [selectedClientId]);
 
@@ -269,6 +295,73 @@ export default function App(): React.ReactElement {
     }
   }, []);
 
+  // ——— Wizard handlers ———
+  const handleWizardAdvance = useCallback(() => {
+    if (wizardStep === 1) {
+      setWizardStep(2);
+    } else {
+      setShowWizard(false);
+    }
+  }, [wizardStep]);
+
+  const handleWizardBack = useCallback(() => {
+    if (wizardStep === 2) setWizardStep(1);
+  }, [wizardStep]);
+
+  const handleChangeServer = useCallback(() => {
+    setWizardStep(1);
+    setShowWizard(true);
+  }, []);
+
+  const handleChangeClient = useCallback(() => {
+    setWizardStep(2);
+    setShowWizard(true);
+  }, []);
+
+  // Don't render main UI until initialized
+  if (!initialized) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
+        </header>
+        <div className="middle" style={{ display: 'grid', placeItems: 'center' }}>
+          <span style={{ color: 'var(--text-dim)' }}>Cargando…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Show wizard when no selection and wizard is active
+  if (showWizard && !hasSelection) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
+          <div className="session-info">
+            <span className="pill gray">○ Wizard</span>
+          </div>
+        </header>
+        <Wizard
+          step={wizardStep}
+          servers={servers}
+          clients={clients}
+          selectedServerId={selectedServerId}
+          selectedClientId={selectedClientId}
+          running={running}
+          clientConnected={clientConnected}
+          onSelectServer={handleSelectServer}
+          onSelectClient={handleSelectClient}
+          onAddServer={handleAddServer}
+          onAddClient={handleAddClient}
+          onAdvance={handleWizardAdvance}
+          onBack={handleWizardBack}
+        />
+        <footer className="status">{statusMsg}</footer>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -317,7 +410,13 @@ export default function App(): React.ReactElement {
           onImport={onImport}
         />
       </div>
-      <footer className="status">{statusMsg}</footer>
+      <footer className="status">
+        <div className="status-left">{statusMsg}</div>
+        <div className="status-right">
+          <button className="btn-link" onClick={handleChangeServer} title="Cambiar MCP Server">↻ Server</button>
+          <button className="btn-link" onClick={handleChangeClient} title="Cambiar MCP Client">↻ Client</button>
+        </div>
+      </footer>
     </div>
   );
 }
