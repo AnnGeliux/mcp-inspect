@@ -12,18 +12,13 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import * as os from 'os';
 import { createRequire } from 'module';
 import { StdioProxy } from './proxy';
 import { McpClientController } from './mcpClient';
 import { LogEntry, ServerConfig, SessionExport, JsonRpcMessage, SavedServer, SavedClient } from '../shared/types';
+import { loadServers as loadServersImpl, saveServers as saveServersImpl, loadClients as loadClientsImpl, saveClients as saveClientsImpl } from './persistence';
 
 const nodeRequire = createRequire(__filename);
-
-// ——— Persistence paths ————————————————————————————————————————————
-const CONFIG_DIR = path.join(os.homedir(), '.mcp-inspector');
-const SERVERS_FILE = path.join(CONFIG_DIR, 'servers.json');
-const CLIENTS_FILE = path.join(CONFIG_DIR, 'clients.json');
 
 // ——— Presets (pre-loaded servers/clients) ——————————————————————————
 function defaultServers(everythingPath: string): SavedServer[] {
@@ -89,46 +84,24 @@ function defaultClients(): SavedClient[] {
   ];
 }
 
-async function ensureConfigDir(): Promise<void> {
-  await fs.mkdir(CONFIG_DIR, { recursive: true });
-}
+// ——— Persistence (delegated to persistence.ts) ——————————————————————
 
 async function loadServers(everythingPath: string): Promise<SavedServer[]> {
-  try {
-    const text = await fs.readFile(SERVERS_FILE, 'utf8');
-    const userServers = JSON.parse(text) as SavedServer[];
-    const presets = defaultServers(everythingPath);
-    // Merge: presets first, then user-added (non-preset) servers
-    const userOnly = userServers.filter((s) => !s.preset);
-    return [...presets, ...userOnly];
-  } catch {
-    return defaultServers(everythingPath);
-  }
+  const presets = defaultServers(everythingPath);
+  return loadServersImpl(presets);
 }
 
 async function saveServers(servers: SavedServer[]): Promise<void> {
-  await ensureConfigDir();
-  // Only persist user-added servers (presets are always re-derived)
-  const userServers = servers.filter((s) => !s.preset);
-  await fs.writeFile(SERVERS_FILE, JSON.stringify(userServers, null, 2), 'utf8');
+  await saveServersImpl(servers);
 }
 
 async function loadClients(): Promise<SavedClient[]> {
-  try {
-    const text = await fs.readFile(CLIENTS_FILE, 'utf8');
-    const userClients = JSON.parse(text) as SavedClient[];
-    const presets = defaultClients();
-    const userOnly = userClients.filter((c) => !c.preset);
-    return [...presets, ...userOnly];
-  } catch {
-    return defaultClients();
-  }
+  const presets = defaultClients();
+  return loadClientsImpl(presets);
 }
 
 async function saveClients(clients: SavedClient[]): Promise<void> {
-  await ensureConfigDir();
-  const userClients = clients.filter((c) => !c.preset);
-  await fs.writeFile(CLIENTS_FILE, JSON.stringify(userClients, null, 2), 'utf8');
+  await saveClientsImpl(clients);
 }
 
 let mainWindow: BrowserWindow | null = null;
