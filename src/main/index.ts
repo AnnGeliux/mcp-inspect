@@ -1,20 +1,27 @@
 /**
  * Entry point del Electron main process.
  * Crea ventana, carga el renderer Vite, y expone IPC para:
- *   - proxy:start (spawn)
+ *   - proxy:start (spawn server + conectar cliente MCP real)
  *   - proxy:stop
- *   - proxy:write (cliente → server)
+ *   - proxy:write (cliente → server, raw)
+ *   - client:connect / client:request / client:notify (cliente SDK real)
  *   - proxy:onEntry (push al renderer)
  *   - session:export / session:import
  */
+
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { createRequire } from 'module';
 import { StdioProxy } from './proxy';
+import { McpClientController } from './mcpClient';
 import { LogEntry, ServerConfig, SessionExport, JsonRpcMessage } from '../shared/types';
+
+const nodeRequire = createRequire(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 const proxy = new StdioProxy();
+const mcpClient = new McpClientController();
 const sessionEntries: LogEntry[] = [];
 let sessionConfig: ServerConfig | null = null;
 
@@ -43,39 +50,161 @@ function createWindow(): void {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// --- IPC ----------------------------------------------------------------
+// ——— helpers de entries ————————————————————————————————————————————
+
+function pushEntry(entry: LogEntry): void {
+  sessionEntries.push(entry);
+  mainWindow?.webContents.send('proxy:entry', entry);
+}
+
+/** Entry sintética para eventos del ciclo de vida (no JSON-RPC). */
+function pushLifecycleEntry(kind: 'info' | 'error', message: string): void {
+  pushEntry({
+    seq: lifecycleSeq++,
+    ts: new Date().toISOString(),
+    dir: 's2c',
+    kind: kind === 'error' ? 'error' : 'notification',
+    rpcId: null,
+    method: `[lifecycle]`,
+    raw: message,
+    stderr: message,
+  });
+}
+let lifecycleSeq = 900000; // rango separado para no chocar con seq del proxy/cliente
+
+// ——— Proxy listeners (una sola vez) ————————————————————————————————
+
+proxy.on('entry', pushEntry);
+proxy.on('exit', (code, signal) => {
+  mainWindow?.webContents.send('proxy:exit', { code, signal });
+});
+proxy.on('error', (err) => {
+  mainWindow?.webContents.send('proxy:error', { message: err.message });
+});
+
+// ——— Cliente MCP (SDK) —————————————————————————————————————————————
+
+mcpClient.on('entry', pushEntry);
+mcpClient.on('connected', (info) => {
+  mainWindow?.webContents.send('client:connected', info);
+});
+mcpClient.on('closed', () => {
+  mainWindow?.webContents.send('client:closed');
+});
+mcpClient.on('error', (err) => {
+  mainWindow?.webContents.send('client:error', { message: err.message });
+});
+
+// ——— IPC ————————————————————————————————————————————————————————————
 
 ipcMain.handle('proxy:start', async (_evt, config: ServerConfig) => {
-  sessionConfig = config;
-  sessionEntries.length = 0;
+  try {
+    // stop de sesión previa (si había)
+    if (proxy.running) {
+      await proxy.stop();
+    }
+    if (mcpClient.connected) {
+      await mcpClient.stop();
+    }
 
-  proxy.on('entry', (entry: LogEntry) => {
-    sessionEntries.push(entry);
-    mainWindow?.webContents.send('proxy:entry', entry);
-  });
-  proxy.on('exit', (code, signal) => {
-    mainWindow?.webContents.send('proxy:exit', { code, signal });
-  });
-  proxy.on('error', (err) => {
-    mainWindow?.webContents.send('proxy:error', { message: err.message });
-  });
+    sessionConfig = config;
+    sessionEntries.length = 0;
 
-  proxy.start(config);
-  return { ok: true, running: proxy.running };
+    // spawn del server
+    proxy.start(config);
+    pushLifecycleEntry('info', `server spawned: ${config.command} ${(config.args ?? []).join(' ')}`);
+
+    // conectar cliente MCP real (handshake initialize → initialized)
+    if (config.connectClient !== false) {
+      try {
+        await mcpClient.connectToProxy(proxy.wires(), {
+          name: 'mcp-inspector-client',
+          version: '0.1.0',
+        });
+        const info = mcpClient.getServerInfo();
+        pushLifecycleEntry(
+          'info',
+          `client connected: server "${info.name}" v${info.version} — handshake complete`
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        pushLifecycleEntry('error', `client connect failed: ${msg}`);
+        mainWindow?.webContents.send('client:error', { message: msg });
+      }
+    }
+
+    return { ok: true, running: proxy.running };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, running: false, error: msg };
+  }
 });
 
 ipcMain.handle('proxy:stop', async () => {
+  if (mcpClient.connected) {
+    await mcpClient.stop();
+  }
   await proxy.stop();
   return { ok: true };
 });
 
+// Envío raw (como antes: el inspector como cliente manual)
 ipcMain.handle('proxy:write', async (_evt, msg: JsonRpcMessage) => {
   const ok = proxy.writeClientMessage(msg);
   return { ok };
 });
 
+// Request MCP via cliente SDK real
+ipcMain.handle('client:request', async (_evt, args: { method: string; params?: unknown }) => {
+  try {
+    const result = await mcpClient.request(args.method, args.params);
+    return { ok: true, result };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+});
+
+// Notification MCP via cliente SDK real
+ipcMain.handle('client:notify', async (_evt, args: { method: string; params?: unknown }) => {
+  try {
+    await mcpClient.notify(args.method, args.params);
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+});
+
+// Estado del cliente
+ipcMain.handle('client:status', async () => {
+  return {
+    connected: mcpClient.connected,
+    server: mcpClient.connected ? mcpClient.getServerInfo() : null,
+  };
+});
+
 ipcMain.handle('proxy:status', async () => {
   return { running: proxy.running, count: sessionEntries.length };
+});
+
+// Presets con paths absolutos resueltos desde node_modules del proyecto
+ipcMain.handle('presets:list', async () => {
+  let everythingPath: string;
+  try {
+    everythingPath = nodeRequire.resolve('@modelcontextprotocol/server-everything/dist/index.js');
+  } catch {
+    everythingPath = '';
+  }
+  return {
+    everything: {
+      // electron.exe como Node puro — robusto sin depender del PATH del user
+      command: process.execPath,
+      args: [everythingPath],
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+      connectClient: true,
+    } as ServerConfig,
+  };
 });
 
 ipcMain.handle('session:export', async () => {
@@ -117,7 +246,7 @@ ipcMain.handle('session:import', async () => {
   return { ok: true, count: sess.entries.length };
 });
 
-// --- App lifecycle ------------------------------------------------------
+// ——— App lifecycle ——————————————————————————————————————————————————
 
 app.whenReady().then(() => {
   createWindow();
@@ -127,7 +256,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  proxy.stop().finally(() => {
+  Promise.all([mcpClient.stop(), proxy.stop()]).finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });
 });

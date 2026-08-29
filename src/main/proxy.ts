@@ -20,11 +20,14 @@ import { Readable, Writable } from 'stream';
 import { EventEmitter } from 'events';
 import { NdjsonParser } from './parser';
 import { LogEntry, ServerConfig, Direction, JsonRpcMessage } from '../shared/types';
+import type { ProxyWires } from './mcpClient';
 
 export interface ProxyEvents {
   entry: (entry: LogEntry) => void;
   exit: (code: number | null, signal: NodeJS.Signals | null) => void;
   error: (err: Error) => void;
+  /** Chunk crudo de stdout (NDJSON) — para consumers extra (cliente SDK). */
+  data: (chunk: string) => void;
 }
 
 export declare interface StdioProxy {
@@ -64,6 +67,7 @@ export class StdioProxy extends EventEmitter {
     // stdout (s2c) → NDJSON parser → LogEntry
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', (chunk: string) => {
+      this.emit('data', chunk); // consumers extra (cliente SDK) reciben el chunk crudo
       const msgs = this.stdoutParser.feed(chunk);
       for (const m of msgs) this.emitMessage('s2c', m);
     });
@@ -152,6 +156,29 @@ export class StdioProxy extends EventEmitter {
   /** ¿Está vivo el subprocess? */
   get running(): boolean {
     return this.child !== null && !this._exited;
+  }
+
+  /**
+   * Wires para cablear un MCP client SDK al subprocess del proxy.
+   * El write NO loguea (el transporte del cliente reporta el c2s), y el
+   * onData entrega chunks crudos de stdout (además de los entries que el
+   * proxy ya emite por 'entry').
+   */
+  wires(): ProxyWires {
+    const self = this;
+    return {
+      write: (line: string) => self.writeClientRaw(line),
+      onData: (cb: (chunk: string) => void) => {
+        self.on('data', cb);
+        return () => self.removeListener('data', cb);
+      },
+      onExit: (cb: () => void) => {
+        const handler = () => cb();
+        self.on('exit', handler);
+        return () => self.removeListener('exit', handler);
+      },
+      running: () => self.running,
+    };
   }
 
   private emitMessage(dir: Direction, msg: JsonRpcMessage, rawOverride?: string): void {

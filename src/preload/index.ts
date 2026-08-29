@@ -6,13 +6,27 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { LogEntry, ServerConfig, JsonRpcMessage } from '../shared/types';
 
 const api = {
+  // ——— proxy (server subprocess) ———
   start: (config: ServerConfig) => ipcRenderer.invoke('proxy:start', config),
   stop: () => ipcRenderer.invoke('proxy:stop'),
   write: (msg: JsonRpcMessage) => ipcRenderer.invoke('proxy:write', msg),
   status: () => ipcRenderer.invoke('proxy:status'),
+
+  // ——— cliente MCP real (SDK) ———
+  clientRequest: (method: string, params?: unknown) =>
+    ipcRenderer.invoke('client:request', { method, params }),
+  clientNotify: (method: string, params?: unknown) =>
+    ipcRenderer.invoke('client:notify', { method, params }),
+  clientStatus: () => ipcRenderer.invoke('client:status'),
+
+  // ——— sesión ———
   exportSession: () => ipcRenderer.invoke('session:export'),
   importSession: () => ipcRenderer.invoke('session:import'),
 
+  // ——— presets (paths absolutos desde el main) ———
+  presets: () => ipcRenderer.invoke('presets:list'),
+
+  // ——— eventos push ———
   onEntry: (cb: (e: LogEntry) => void) => {
     const handler = (_: unknown, e: LogEntry) => cb(e);
     ipcRenderer.on('proxy:entry', handler);
@@ -27,6 +41,21 @@ const api = {
     const handler = (_: unknown, info: { message: string }) => cb(info);
     ipcRenderer.on('proxy:error', handler);
     return () => ipcRenderer.removeListener('proxy:error', handler);
+  },
+  onClientConnected: (cb: (info: { serverName: string; serverVersion: string }) => void) => {
+    const handler = (_: unknown, info: { serverName: string; serverVersion: string }) => cb(info);
+    ipcRenderer.on('client:connected', handler);
+    return () => ipcRenderer.removeListener('client:connected', handler);
+  },
+  onClientClosed: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('client:closed', handler);
+    return () => ipcRenderer.removeListener('client:closed', handler);
+  },
+  onClientError: (cb: (info: { message: string }) => void) => {
+    const handler = (_: unknown, info: { message: string }) => cb(info);
+    ipcRenderer.on('client:error', handler);
+    return () => ipcRenderer.removeListener('client:error', handler);
   },
 };
 

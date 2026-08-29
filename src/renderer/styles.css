@@ -86,3 +86,21 @@ input, textarea { font-family: inherit; }
 .jt-leaf.jt-num { color: var(--yellow); }
 .jt-leaf.jt-null { color: var(--text-dim); font-style: italic; }
 .jt-leaf.jt-bool { color: var(--accent); }
+
+/* ClientPanel extras */
+.role-tag.green { color: var(--green); border-color: rgba(63, 185, 80, 0.4); background: rgba(63, 185, 80, 0.12); }
+.mono { font-family: var(--mono); }
+.result-pre {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  color: var(--text);
+}

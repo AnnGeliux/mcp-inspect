@@ -7,23 +7,32 @@ interface Props {
   running: boolean;
   onStart: () => void;
   onStop: () => void;
+  /** Preset del server MCP real (paths absolutos) — llega del main via App. */
+  everythingPreset: ServerConfig | null;
 }
 
-export default function ServerPanel({ config, onChange, running, onStart, onStop }: Props): React.ReactElement {
+export default function ServerPanel({ config, onChange, running, onStart, onStop, everythingPreset }: Props): React.ReactElement {
   const cmdStr = [config.command, ...(config.args ?? [])].join(' ');
 
   const update = (patch: Partial<ServerConfig>) => onChange({ ...config, ...patch });
 
-  const presets: Array<{ label: string; cfg: ServerConfig }> = [
+  const presets: Array<{ label: string; cfg: ServerConfig }> = [];
+  if (everythingPreset) {
+    presets.push({
+      label: `everything-server (MCP real)`,
+      cfg: everythingPreset,
+    });
+  }
+  presets.push(
     {
       label: 'echo (test)',
-      cfg: { command: 'node', args: ['-e', "process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{const m=JSON.parse(d.trim());if(m.id)console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{ok:true}}));else if(m.method)console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/message',params:{level:'info',data:m.method}}));});"] },
+      cfg: { command: 'node', args: ['-e', "process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{const m=JSON.parse(d.trim());if(m.id)console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{ok:true}}));else if(m.method)console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/message',params:{level:'info',data:m.method}}));});"], connectClient: false },
     },
     {
       label: 'echo CRLF (test)',
-      cfg: { command: 'node', args: ['-e', "process.stdin.setEncoding('utf8');let b='';process.stdin.on('data',d=>{b+=d;let n;while((n=b.indexOf('\\n'))>=0){const line=b.slice(0,n).replace(/\\r$/,'');b=b.slice(n+1);const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{echo:m.method}})+'\\r\\n');}});"] },
-    },
-  ];
+      cfg: { command: 'node', args: ['-e', "process.stdin.setEncoding('utf8');let b='';process.stdin.on('data',d=>{b+=d;let n;while((n=b.indexOf('\\\\n'))>=0){const line=b.slice(0,n).replace(/\\\\r$/,'');b=b.slice(n+1);const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{echo:m.method}})+'\\\\r\\\\n');}});"], connectClient: false },
+    }
+  );
 
   return (
     <section className="panel">

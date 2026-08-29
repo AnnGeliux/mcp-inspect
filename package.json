@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server-everything": "^2026.8.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   }

@@ -71,6 +71,12 @@ export interface ServerConfig {
   args: string[];
   /** Env vars extra. */
   env?: Record<string, string>;
+  /**
+   * Si true (default), el cliente MCP real (SDK) se conecta al proxy tras
+   * el spawn y ejecuta el handshake initialize → initialized.
+   * Los presets de test (echo) usan false: no son servers MCP completos.
+   */
+  connectClient?: boolean;
 }
 
 /** Estado de sesión exportable. */
