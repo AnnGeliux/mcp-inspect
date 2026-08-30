@@ -29,7 +29,7 @@ async function main() {
   const client = new McpClientController();
 
   proxy.on('entry', (e) => entries.push(e));
-  client.on('entry', (e) => entries.push(e));
+  // (el logging está centralizado en el proxy — el cliente ya no emite entries)
 
   // 1. Spawn del server real via proxy
   console.log('[1] Spawning everything-server (real MCP server)…');
@@ -42,7 +42,8 @@ async function main() {
 
   // 2. Conectar cliente SDK real al proxy → handshake
   console.log('[2] Connecting SDK client → handshake initialize/initialized…');
-  await client.connectToProxy(proxy.wires(), { name: 'inspector-test-client', version: '0.1.0' });
+  // deliveredWires: sends por el pipeline (interceptables), receives solo lo entregado
+  await client.connectToProxy(proxy.deliveredWires(), { name: 'inspector-test-client', version: '0.1.0' });
   const info = client.getServerInfo();
   console.log(`    server: "${info.name}" v${info.version}`);
   console.log(`    capabilities: ${Object.keys((info.capabilities as Record<string, unknown>) ?? {}).join(', ')}`);

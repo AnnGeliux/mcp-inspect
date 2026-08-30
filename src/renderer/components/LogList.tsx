@@ -7,15 +7,35 @@ interface Props {
 }
 
 type FilterType = 'all' | 'request' | 'response' | 'notification' | 'error';
+type ViewMode = 'formatted' | 'raw';
 
 /** Pixels of tolerance to consider the user "at the bottom". */
 const STICKY_THRESHOLD = 24;
 
+/** Métodos MCP estándar para el filtro por método (Phase 5). */
+const METHOD_FILTERS = [
+  { label: 'all', value: '' },
+  { label: 'initialize', value: 'initialize' },
+  { label: 'ping', value: 'ping' },
+  { label: 'tools/*', value: 'tools/' },
+  { label: 'resources/*', value: 'resources/' },
+  { label: 'prompts/*', value: 'prompts/' },
+  { label: 'sampling/*', value: 'sampling/' },
+  { label: 'roots/*', value: 'roots/' },
+  { label: 'elicitation/*', value: 'elicitation/' },
+  { label: 'notifications/*', value: 'notifications/' },
+  { label: 'completion/*', value: 'completion/' },
+  { label: 'logging/*', value: 'logging/' },
+];
+
 export default function LogList({ entries }: Props): React.ReactElement {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<FilterType>('all');
+  const [methodFilter, setMethodFilter] = useState('');
   const [search, setSearch] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [viewMode, setViewMode] = useState<ViewMode>('formatted');
+  const [copied, setCopied] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const [showJumpBtn, setShowJumpBtn] = useState(false);
@@ -29,7 +49,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
     const el = listRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
-  }, [entriesCount, filter, search]);
+  }, [entriesCount, filter, search, methodFilter]);
 
   // Track scroll position: if the user scrolls away from the bottom, stop following.
   const handleScroll = () => {
@@ -61,10 +81,16 @@ export default function LogList({ entries }: Props): React.ReactElement {
     return c;
   }, [entries]);
 
+  /** Método efectivo de un entry (responses: el request correlacionado). */
+  const entryMethod = (e: LogEntry): string => (e.method && e.method !== '[lifecycle]' && e.method !== '[stderr]' && e.method !== '[proxy]' ? e.method : e.requestMethod ?? '');
+
   // Filtered entries
   const filtered = useMemo(() => {
     let list = entries;
     if (filter !== 'all') list = list.filter((e) => e.kind === filter);
+    if (methodFilter !== '') {
+      list = list.filter((e) => entryMethod(e).startsWith(methodFilter));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((e) => {
@@ -75,7 +101,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
       });
     }
     return list;
-  }, [entries, filter, search]);
+  }, [entries, filter, methodFilter, search]);
 
   const toggle = (seq: number) => {
     setExpanded((prev) => {
@@ -83,6 +109,12 @@ export default function LogList({ entries }: Props): React.ReactElement {
       if (next.has(seq)) next.delete(seq); else next.add(seq);
       return next;
     });
+  };
+
+  const copyRaw = (e: LogEntry) => {
+    void window.api.clipboardWrite(e.raw);
+    setCopied(e.seq);
+    window.setTimeout(() => setCopied(null), 1200);
   };
 
   const filters: { key: FilterType; label: string; count: number }[] = [
@@ -99,11 +131,11 @@ export default function LogList({ entries }: Props): React.ReactElement {
         <span className="icon">📜</span>
         <span>Tráfico en vivo</span>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)', fontWeight: 400 }}>
-          Read-only MITM · {entries.length} mensajes
+          MITM · {entries.length} mensajes
         </span>
       </div>
 
-      {/* Toolbar: filters + search */}
+      {/* Toolbar: filters + method filter + search */}
       <div className="log-toolbar">
         <div className="log-filters">
           {filters.map((f) => (
@@ -118,6 +150,18 @@ export default function LogList({ entries }: Props): React.ReactElement {
             </button>
           ))}
         </div>
+        <select
+          className="log-method-filter"
+          value={methodFilter}
+          onChange={(e) => setMethodFilter(e.target.value)}
+          title="Filtrar por método MCP"
+        >
+          {METHOD_FILTERS.map((m) => (
+            <option key={m.value || 'all'} value={m.value}>
+              {m.label === 'all' ? 'método: todos' : m.label}
+            </option>
+          ))}
+        </select>
         <input
           className="log-search"
           placeholder="Buscar método, id, payload…"
@@ -155,16 +199,66 @@ export default function LogList({ entries }: Props): React.ReactElement {
                   {dirLabel(e)}
                 </span>
                 <span className="method">
-                  <span className="m">{e.method ?? (e.kind === 'response' ? `← ${e.rpcId}` : '(?)')}</span>
+                  <span className="m">{e.method ?? (e.kind === 'response' || e.kind === 'error' ? `← ${e.rpcId}` : '(?)')}</span>
                   {e.rpcId != null && <span className="id">id={String(e.rpcId)}</span>}
                 </span>
+                {/* Latencia correlacionada (Phase 5) */}
+                {e.latencyMs !== undefined && (
+                  <span className={`latency ${e.latencyMs > 2000 ? 'slow' : ''}`} title={`Latencia request→response (${e.requestMethod ?? '?'})`}>
+                    {e.latencyMs} ms
+                  </span>
+                )}
+                {/* Badge de spec (Phase 5) */}
+                {e.spec && !e.spec.ok && (
+                  <span className="spec-badge spec-error" title={`No conforme con la spec MCP: ${e.spec.issues ?? ''}`}>
+                    ⚠ spec
+                  </span>
+                )}
+                {/* Badges de interceptación (Phase 6) */}
+                {e.held && <span className="pill warning" title={`Retenido ${e.heldMs ?? 0} ms`}>⏸</span>}
+                {e.modified && <span className="pill purple" title="Modificado por el usuario">✎</span>}
+                {e.dropped && <span className="pill danger" title="Descartado — nunca llegó a destino">✕</span>}
                 <span className={`status ${e.error ? 'err' : ''}`}>
                   {e.error ? `code ${e.error.code}` : status(e)}
                 </span>
               </div>
               {isOpen && (
                 <div className="preview" onClick={(ev) => ev.stopPropagation()}>
-                  <JsonHighlight data={buildTreeData(e)} />
+                  <div className="preview-toolbar">
+                    <div className="view-tabs">
+                      <button
+                        className={`view-tab ${viewMode === 'formatted' ? 'active' : ''}`}
+                        onClick={(ev2) => { ev2.stopPropagation(); setViewMode('formatted'); }}
+                        title="Vista formateada con sintaxis coloreada"
+                      >
+                        Formatted
+                      </button>
+                      <button
+                        className={`view-tab ${viewMode === 'raw' ? 'active' : ''}`}
+                        onClick={(ev2) => { ev2.stopPropagation(); setViewMode('raw'); }}
+                        title="JSON sin formato, copiable"
+                      >
+                        Raw
+                      </button>
+                    </div>
+                    <button
+                      className="btn-link"
+                      onClick={(ev2) => { ev2.stopPropagation(); copyRaw(e); }}
+                      title="Copiar payload al portapapeles"
+                    >
+                      {copied === e.seq ? '✓ Copiado' : '⧉ Copiar'}
+                    </button>
+                  </div>
+                  {viewMode === 'formatted' ? (
+                    <JsonHighlight data={buildTreeData(e)} maxHeight={280} />
+                  ) : (
+                    <pre className="raw-json"><code>{rawOf(e)}</code></pre>
+                  )}
+                  {e.spec && !e.spec.ok && (
+                    <div className="spec-issues danger-text" title="Detalle">
+                      ⚠ Spec MCP: {e.spec.issues ?? 'no conforme'}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -185,8 +279,14 @@ function dirLabel(e: LogEntry): string {
 
 function status(e: LogEntry): string {
   if (e.stderr) return 'stderr';
+  if (e.dropped) return 'dropped';
   if (e.result !== undefined) return 'ok';
   return '';
+}
+
+/** Payload raw sin formato (para el tab Raw). */
+function rawOf(e: LogEntry): string {
+  return e.raw;
 }
 
 function formatTs(iso: string): string {

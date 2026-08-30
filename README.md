@@ -21,7 +21,7 @@
 
 ## 🎯 ¿Qué hace?
 
-MCP Inspector se interpone entre un servidor MCP y un cliente MCP como un proxy de solo lectura. Captura todo el tráfico JSON-RPC 2.0 que pasa entre ambos y lo muestra en una interfaz visual con timestamps, sintaxis coloreada, filtros y búsqueda.
+MCP Inspector se interpone entre un servidor MCP y un cliente MCP como un proxy MITM. Captura todo el tráfico JSON-RPC 2.0, lo muestra en una interfaz visual con timestamps, latencia, filtros y búsqueda — y permite pausarlo con breakpoints para editar peticiones y respuestas al vuelo (enviar, modificar, descartar o responder manualmente) sin tocar el server ni el cliente.
 
 **Casos de uso:**
 - Depurar por qué un cliente MCP no recibe respuestas correctas de un servidor
@@ -41,11 +41,26 @@ MCP Inspector se interpone entre un servidor MCP y un cliente MCP como un proxy 
 
 ### Panel de tráfico en vivo
 - Log cronológico con timestamps absolutos y relativos ("hace 2s")
+- **Latencia por transacción** — correlación request↔response por ID, delta en ms en cada respuesta
 - **Filtros por tipo:** requests, responses, notifications, errors, all
+- **Filtro por método MCP** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*`…
+- **Visor dual** — tab *Formatted* (árbol coloreado) + tab *Raw* (JSON copiable al portapapeles)
+- **Validación de spec MCP** — cada trama se valida contra los schemas zod del SDK oficial; badge ⚠ en las no conformes
 - **Búsqueda** por método, ID JSON-RPC o contenido del payload
 - **Colapsar/expandir** cada entrada (click para ver payload completo)
 - **Syntax highlighting JSON:** keys (azul), strings (verde), numbers (naranja), booleans (morado), null (gris)
 - **Contadores** por tipo con badges
+
+### Interceptación MITM (breakpoints)
+- **Breakpoints de petición (→)** — pausa cualquier mensaje cliente→server antes de llegar al server
+- **Breakpoints de respuesta (←)** — pausa cualquier mensaje server→cliente antes de llegar al LLM
+- **Reglas por método** — intercepta solo `tools/call`, `resources/read`, o todo el tráfico
+- **Editor inline** — edita el JSON retenido y decide: Enviar / Enviar editado / Drop / Responder manual
+- **Orden FIFO garantizado** — los mensajes nunca se reordenan aunque resuelvas fuera de orden
+- **Entrega post-pipeline consistente** — el log muestra exactamente lo que se entregó
+
+### Gestor de procesos
+- **Reiniciar / Stop / Matar** el subprocess MCP sin reiniciar el cliente (Claude/Cursor/VS Code)
 
 ### Wizard de configuración
 - Flujo guiado de 2 pasos: elegir server → elegir client → tráfico en vivo
@@ -308,22 +323,22 @@ npm run test:proxy
 #### Phase 5 — Observabilidad pro 🟢
 *Cierra: 2a (latencia), 2b (visor dual), 2c (filtro por método), 1c (gestor de procesos), 4c (validación spec).*
 
-- [ ] **Latencia por transacción** — correlación request↔response por `rpcId`, delta en ms visible en cada entrada
-- [ ] **Filtro por método MCP** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*` (además del filtro por tipo existente)
-- [ ] **Visor dual** — tab *Formatted* (coloreado actual) + tab *Raw* con JSON sin formato y botón copiar
-- [ ] **Gestor de procesos** — botones Reiniciar / Pausar / Matar el subprocess sin reiniciar el cliente (Claude/Cursor)
-- [ ] **Validación de spec MCP** — cada trama se valida contra los schemas zod del SDK oficial; badge visual en las no conformes
+- [x] **Latencia por transacción** — correlación request↔response por `rpcId`, delta en ms visible en cada entrada
+- [x] **Filtro por método MCP** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*` (además del filtro por tipo existente)
+- [x] **Visor dual** — tab *Formatted* (coloreado actual) + tab *Raw* con JSON sin formato y botón copiar
+- [x] **Gestor de procesos** — botones Reiniciar / Pausar / Matar el subprocess sin reiniciar el cliente (Claude/Cursor)
+- [x] **Validación de spec MCP** — cada trama se valida contra los schemas zod del SDK oficial; badge visual en las no conformes
 
 *Base existente: timestamps, filtros por kind, `JsonHighlight`, stop SIGTERM→SIGKILL; el SDK ya incluye schemas zod.*
 
 #### Phase 6 — Interceptación MITM 🔴
 *Cierra: 3a (breakpoint de petición) y 3b (breakpoint de respuesta). El salto de sniffer → MITM.*
 
-- [ ] **Re-arquitectura del proxy** — de tee ciego a pipeline con hooks `onClientMessage` / `onServerMessage`, transport-agnóstico
-- [ ] **Breakpoint de petición** — pausar el c2s, editar `params`/inputSchema, reenviar alterado al server
-- [ ] **Breakpoint de respuesta** — pausar el s2c, editar `result`/`error`, liberar al cliente/LLM y evaluar su reacción
-- [ ] **UI de interceptación** — banner "⏸ interceptado", editor inline, acciones Enviar / Enviar editado / Drop / Responder manual
-- [ ] **Reglas** — breakpoints siempre, por método o condicionales; toggle global on/off
+- [x] **Re-arquitectura del proxy** — de tee ciego a pipeline con hooks `onClientMessage` / `onServerMessage`, transport-agnóstico
+- [x] **Breakpoint de petición** — pausar el c2s, editar `params`/inputSchema, reenviar alterado al server
+- [x] **Breakpoint de respuesta** — pausar el s2c, editar `result`/`error`, liberar al cliente/LLM y evaluar su reacción
+- [x] **UI de interceptación** — banner "⏸ interceptado", editor inline, acciones Enviar / Enviar editado / Drop / Responder manual
+- [x] **Reglas** — breakpoints siempre, por método o condicionales; toggle global on/off
 
 *Base existente: ninguna — el proxy hoy es read-only byte a byte. Esta fase habilita las fases 7 y 9.*
 

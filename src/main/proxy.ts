@@ -1,10 +1,15 @@
 /**
- * Proxy STDIO MITM.
+ * Proxy STDIO MITM con pipeline de interceptación.
  *
  * Spawn del subprocess MCP server. Captura:
- * - stdout (NDJSON) → parseado a LogEntry (dirección s2c)
+ * - stdout (NDJSON) → pipeline → parseado a LogEntry (dirección s2c)
  * - stderr (texto libre UTF-8) → LogEntry con campo stderr
- * - stdin (cliente → server) → reenviado byte a byte + log con dirección c2s
+ * - stdin (cliente → server) → pipeline → reenviado + log con dirección c2s
+ *
+ * Phase 6 — interceptación: cada mensaje pasa por MITMPipeline antes de
+ * entregarse. Sin reglas activas, la entrega es inmediata (read-only de
+ * siempre). Con reglas, el mensaje se retiene hasta que el usuario decide
+ * (send / send-modified / drop / respond). Ver pipeline.ts.
  *
  * Spec: research/transports_summary.md
  *   "Server MUST NOT write anything to its stdout that is not a valid MCP message."
@@ -19,6 +24,7 @@ import { spawn, ChildProcessByStdio } from 'child_process';
 import { Readable, Writable } from 'stream';
 import { EventEmitter } from 'events';
 import { NdjsonParser } from './parser';
+import { MITMPipeline } from './pipeline';
 import { LogEntry, ServerConfig, Direction, JsonRpcMessage } from '../shared/types';
 import type { ProxyWires } from './mcpClient';
 
@@ -28,6 +34,12 @@ export interface ProxyEvents {
   error: (err: Error) => void;
   /** Chunk crudo de stdout (NDJSON) — para consumers extra (cliente SDK). */
   data: (chunk: string) => void;
+  /**
+   * Chunk de stdout post-pipeline (solo mensajes ENTREGADOS al cliente).
+   * El cliente SDK se suscribe aquí en vez de 'data' para no recibir lo
+   * que el pipeline descartó/alteró de forma inconsistente con el log.
+   */
+  deliveredS2c: (chunk: string) => void;
 }
 
 export declare interface StdioProxy {
@@ -41,6 +53,8 @@ export class StdioProxy extends EventEmitter {
   private stderrBuf = '';
   private seq = 0;
   private _exited = false;
+  /** Pipeline MITM compartido con el main (reglas + holds). */
+  readonly pipeline = new MITMPipeline();
 
   /** Inicia el subprocess con la config dada. Idempotent. */
   start(config: ServerConfig): void {
@@ -63,18 +77,18 @@ export class StdioProxy extends EventEmitter {
     this.stdoutParser = new NdjsonParser();
     this.stderrBuf = '';
     this._exited = false;
+    this.pipeline.clearCorrelation();
 
-    // stdout (s2c) → NDJSON parser → LogEntry
+    // stdout (s2c) → pipeline → NDJSON parser → LogEntry
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', (chunk: string) => {
-      this.emit('data', chunk); // consumers extra (cliente SDK) reciben el chunk crudo
       const msgs = this.stdoutParser.feed(chunk);
-      for (const m of msgs) this.emitMessage('s2c', m);
+      for (const m of msgs) this.handleS2cMessage(m);
     });
     proc.stdout.on('end', () => {
       // EOF en stdout → fin de sesión STDIO
       const tail = this.stdoutParser.flush();
-      for (const m of tail) this.emitMessage('s2c', m);
+      for (const m of tail) this.handleS2cMessage(m);
       const pending = this.stdoutParser.pending;
       if (pending) this.emitErr(`[proxy] stdout closed with unparsed data: ${JSON.stringify(pending).slice(0, 200)}`);
     });
@@ -106,18 +120,52 @@ export class StdioProxy extends EventEmitter {
   }
 
   /**
-   * Cliente → server: escribir un mensaje JSON-RPC completo al stdin del server.
-   * Devuelve true si se enqueó, false si el proceso no está corriendo.
+   * Mensaje s2c (server → cliente): pasa por el pipeline. Si fluye, se loguea
+   * Y se emite como deliveredS2c (chunks NDJSON para el cliente SDK). Si se
+   * retiene, no se loguea todavía — se loguea al resolverse con los flags
+   * held/modified/dropped correspondientes.
+   */
+  private async handleS2cMessage(msg: JsonRpcMessage): Promise<void> {
+    const arrivedAt = Date.now();
+    const result = await this.pipeline.process('s2c', msg, arrivedAt);
+
+    if (result.msg === null) {
+      // drop / respond: el original nunca se entrega. Se loguea como dropped.
+      const corr = this.pipeline.correlateResponse('s2c', msg, arrivedAt);
+      this.emitMessage('s2c', msg, undefined, {
+        latencyMs: corr?.latencyMs,
+        requestMethod: corr?.requestMethod,
+        held: result.held,
+        heldMs: result.heldMs,
+        modified: result.modified,
+        dropped: true,
+      });
+      return;
+    }
+
+    // Entregar: log entry + chunk al cliente SDK
+    const corr = this.pipeline.correlateResponse('s2c', result.msg, arrivedAt);
+    this.emitMessage('s2c', result.msg, undefined, {
+      latencyMs: corr?.latencyMs,
+      requestMethod: corr?.requestMethod,
+      held: result.held,
+      heldMs: result.heldMs,
+      modified: result.modified,
+    });
+
+    const chunk = JSON.stringify(result.msg) + '\n';
+    this.emit('deliveredS2c', chunk);
+  }
+
+  /**
+   * Cliente → server: el mensaje pasa por el pipeline y se escribe al stdin
+   * cuando resuelve. Devuelve true si el pipeline lo aceptó (aunque esté en
+   * hold — el write real es async), false si el proceso no está corriendo.
    */
   writeClientMessage(msg: JsonRpcMessage): boolean {
     if (!this.child || this._exited) return false;
     const line = JSON.stringify(msg) + '\n';
-    try {
-      this.child.stdin.write(line, 'utf8');
-    } catch {
-      return false;
-    }
-    this.emitMessage('c2s', msg, line);
+    void this.writeC2sThroughPipeline(msg, line);
     return true;
   }
 
@@ -129,6 +177,36 @@ export class StdioProxy extends EventEmitter {
     } catch {
       return false;
     }
+    return true;
+  }
+
+  /** Pipeline c2s: entregar al stdin del server cuando resuelva. Devuelve true si se aceptó al pipeline. */
+  private async writeC2sThroughPipeline(msg: JsonRpcMessage, originalLine?: string): Promise<boolean> {
+    const line0 = originalLine ?? JSON.stringify(msg) + '\n';
+    const result = await this.pipeline.process('c2s', msg);
+
+    if (result.msg === null) {
+      // dropped por el usuario
+      this.emitMessage('c2s', msg, line0, {
+        held: result.held,
+        heldMs: result.heldMs,
+        modified: result.modified,
+        dropped: true,
+      });
+      return false;
+    }
+
+    const line = result.modified ? JSON.stringify(result.msg) + '\n' : line0;
+    try {
+      this.child?.stdin.write(line, 'utf8');
+    } catch {
+      return false; // proceso murió mientras se decidía — ignorar
+    }
+    this.emitMessage('c2s', result.msg, line, {
+      held: result.held,
+      heldMs: result.heldMs,
+      modified: result.modified,
+    });
     return true;
   }
 
@@ -151,6 +229,13 @@ export class StdioProxy extends EventEmitter {
       // SIGTERM por si no termina al cerrar stdin
       try { c.kill('SIGTERM'); } catch { /* ignore */ }
     });
+  }
+
+  /** Mata el proceso inmediatamente (SIGKILL, sin gracia). */
+  kill(): void {
+    const c = this.child;
+    if (!c || this._exited) return;
+    try { c.kill('SIGKILL'); } catch { /* ignore */ }
   }
 
   /** ¿Está vivo el subprocess? */
@@ -181,7 +266,55 @@ export class StdioProxy extends EventEmitter {
     };
   }
 
-  private emitMessage(dir: Direction, msg: JsonRpcMessage, rawOverride?: string): void {
+  /**
+   * Wires post-pipeline: el cliente SDK envía y recibe solo a través del
+   * pipeline de interceptación. El write enruta cada mensaje JSON-RPC por
+   * pipeline.process('c2s') — retiene si hay breakpoint, loguea al resolverse
+   * (una sola vez, con flags held/modified). El onData entrega solo los
+   * chunks s2c entregados por el pipeline (consistente con el log).
+   */
+  deliveredWires(): ProxyWires {
+    const self = this;
+    return {
+      write: (line: string) => {
+        // Parsear el mensaje y enrutarlo por el pipeline (interceptable + logging único).
+        let msg: JsonRpcMessage | null = null;
+        try {
+          const parsed = JSON.parse(line.trim());
+          if (parsed && typeof parsed === 'object' && 'jsonrpc' in parsed) msg = parsed as JsonRpcMessage;
+        } catch { /* línea no-JSON */ }
+        if (msg === null) {
+          // No JSON (no debería pasar con el SDK) — write crudo sin pipeline.
+          return self.writeClientRaw(line);
+        }
+        return self.writeC2sThroughPipeline(msg);
+      },
+      onData: (cb: (chunk: string) => void) => {
+        self.on('deliveredS2c', cb);
+        return () => self.removeListener('deliveredS2c', cb);
+      },
+      onExit: (cb: () => void) => {
+        const handler = () => cb();
+        self.on('exit', handler);
+        return () => self.removeListener('exit', handler);
+      },
+      running: () => self.running,
+    };
+  }
+
+  private emitMessage(
+    dir: Direction,
+    msg: JsonRpcMessage,
+    rawOverride?: string,
+    extra?: {
+      latencyMs?: number;
+      requestMethod?: string;
+      held?: boolean;
+      heldMs?: number;
+      modified?: boolean;
+      dropped?: boolean;
+    },
+  ): void {
     const seq = ++this.seq;
     const ts = new Date().toISOString();
     const raw = rawOverride ?? JSON.stringify(msg);
@@ -212,7 +345,19 @@ export class StdioProxy extends EventEmitter {
       rpcId = null;
     }
 
-    const entry: LogEntry = { seq, ts, dir, kind, rpcId, method, result, error, params, raw };
+    const entry: LogEntry = {
+      seq,
+      ts,
+      dir,
+      kind,
+      rpcId,
+      method,
+      result,
+      error,
+      params,
+      raw,
+      ...(extra ?? {}),
+    };
     this.emit('entry', entry);
   }
 

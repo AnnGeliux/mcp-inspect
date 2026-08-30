@@ -3,6 +3,7 @@ import ServerPanel from './components/ServerPanel';
 import ClientPanel from './components/ClientPanel';
 import LogList from './components/LogList';
 import Wizard from './components/Wizard';
+import InterceptBar from './components/InterceptBar';
 import {
   LogEntry,
   ServerConfig,
@@ -10,6 +11,9 @@ import {
   JsonRpcMessage,
   SavedServer,
   SavedClient,
+  InterceptRule,
+  HeldMessage,
+  HoldResolution,
 } from '../shared/types';
 
 // Tipo del bridge expuesto por preload.ts via contextBridge.
@@ -18,6 +22,8 @@ declare global {
     api: {
       start(c: ServerConfig): Promise<{ ok: boolean; running: boolean; error?: string }>;
       stop(): Promise<{ ok: boolean }>;
+      restart(): Promise<{ ok: boolean; running?: boolean; error?: string }>;
+      killServer(): Promise<{ ok: boolean }>;
       write(m: JsonRpcMessage): Promise<{ ok: boolean }>;
       status(): Promise<{ running: boolean; count: number }>;
       clientRequest(method: string, params?: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>;
@@ -29,12 +35,25 @@ declare global {
       saveServers(servers: SavedServer[]): Promise<{ ok: boolean }>;
       loadClients(): Promise<SavedClient[]>;
       saveClients(clients: SavedClient[]): Promise<{ ok: boolean }>;
+      interceptList(): Promise<{ rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[] }>;
+      interceptAddRule(dir: 'c2s' | 's2c', method: string): Promise<{ ok: boolean; rule?: InterceptRule }>;
+      interceptRemoveRule(id: string): Promise<{ ok: boolean }>;
+      interceptToggleRule(id: string, enabled: boolean): Promise<{ ok: boolean }>;
+      interceptSetInterceptAll(dir: 'c2s' | 's2c', on: boolean): Promise<{ ok: boolean }>;
+      interceptResolve(id: string, resolution: HoldResolution): Promise<{ ok: boolean }>;
+      interceptClear(): Promise<{ ok: boolean }>;
+      clipboardWrite(text: string): Promise<{ ok: boolean }>;
+      specGet(): Promise<{ enabled: boolean }>;
+      specSet(enabled: boolean): Promise<{ ok: boolean }>;
       onEntry(cb: (e: LogEntry) => void): () => void;
       onExit(cb: (info: { code: number | null; signal: string | null }) => void): () => void;
       onError(cb: (info: { message: string }) => void): () => void;
       onClientConnected(cb: (info: { serverName: string; serverVersion: string }) => void): () => void;
       onClientClosed(cb: () => void): () => void;
       onClientError(cb: (info: { message: string }) => void): () => void;
+      onInterceptRules(cb: (state: { rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[] }) => void): () => void;
+      onInterceptHeld(cb: (held: HeldMessage) => void): () => void;
+      onInterceptReleased(cb: () => void): () => void;
     };
   }
 }
@@ -60,6 +79,12 @@ export default function App(): React.ReactElement {
   const [wizardStep, setWizardStep] = useState<1 | 2>(1);
   const [showWizard, setShowWizard] = useState(false);
   const [initialized, setInitialized] = useState(false);
+
+  // ——— Intercept state (Phase 6) ———
+  const [interceptRules, setInterceptRules] = useState<InterceptRule[]>([]);
+  const [interceptAllC2s, setInterceptAllC2sState] = useState(false);
+  const [interceptAllS2c, setInterceptAllS2cState] = useState(false);
+  const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
 
   // Config editable del server seleccionado
   const [config, setConfig] = useState<ServerConfig>({ command: '', args: [] });
@@ -112,9 +137,42 @@ export default function App(): React.ReactElement {
       setStatusMsg('Cliente desconectado.');
     });
     const offCError = window.api.onClientError((info) => setStatusMsg(`CLIENT ERROR: ${info.message}`));
+    const offIRules = window.api.onInterceptRules((state) => {
+      setInterceptRules(state.rules);
+      setInterceptAllC2sState(state.interceptAllC2s);
+      setInterceptAllS2cState(state.interceptAllS2c);
+      setHeldMessages(state.held);
+    });
+    const offIHeld = window.api.onInterceptHeld(() => {
+      void window.api.interceptList().then((s) => {
+        setInterceptRules(s.rules);
+        setInterceptAllC2sState(s.interceptAllC2s);
+        setInterceptAllS2cState(s.interceptAllS2c);
+        setHeldMessages(s.held);
+      });
+    });
+    const offIReleased = window.api.onInterceptReleased(() => {
+      void window.api.interceptList().then((s) => {
+        setInterceptRules(s.rules);
+        setInterceptAllC2sState(s.interceptAllC2s);
+        setInterceptAllS2cState(s.interceptAllS2c);
+        setHeldMessages(s.held);
+      });
+    });
     return () => {
       offEntry(); offExit(); offError(); offConn(); offClosed(); offCError();
+      offIRules(); offIHeld(); offIReleased();
     };
+  }, []);
+
+  // Fetch intercept state on mount
+  useEffect(() => {
+    void window.api.interceptList().then((s) => {
+      setInterceptRules(s.rules);
+      setInterceptAllC2sState(s.interceptAllC2s);
+      setInterceptAllS2cState(s.interceptAllS2c);
+      setHeldMessages(s.held);
+    });
   }, []);
 
   // ——— Server CRUD ———
@@ -234,6 +292,24 @@ export default function App(): React.ReactElement {
     await window.api.stop();
   }, []);
 
+  // Reiniciar el subprocess con la misma config (Phase 5)
+  const onRestart = useCallback(async () => {
+    setStatusMsg('Reiniciando server…');
+    const r = await window.api.restart();
+    if (r.ok) {
+      setRunning(r.running ?? true);
+      setStatusMsg('Server reiniciado — sesión conservada.');
+    } else {
+      setStatusMsg(`Reinicio falló: ${r.error ?? 'unknown'}`);
+    }
+  }, []);
+
+  // Matar el subprocess inmediatamente (Phase 5)
+  const onKill = useCallback(async () => {
+    await window.api.killServer();
+    setStatusMsg('Server matado (SIGKILL).');
+  }, []);
+
   // Auto-start when both server + client are selected (once)
   useEffect(() => {
     if (
@@ -293,6 +369,37 @@ export default function App(): React.ReactElement {
       const s = await window.api.status();
       setEntries((prev) => prev.slice(0, s.count));
     }
+  }, []);
+
+  // ——— Intercept handlers (Phase 6) ———
+  const handleAddRule = useCallback((dir: 'c2s' | 's2c', method: string) => {
+    void window.api.interceptAddRule(dir, method);
+  }, []);
+
+  const handleRemoveRule = useCallback((id: string) => {
+    void window.api.interceptRemoveRule(id);
+  }, []);
+
+  const handleToggleRule = useCallback((id: string, enabled: boolean) => {
+    void window.api.interceptToggleRule(id, enabled);
+  }, []);
+
+  const handleSetInterceptAll = useCallback((dir: 'c2s' | 's2c', on: boolean) => {
+    void window.api.interceptSetInterceptAll(dir, on);
+  }, []);
+
+  const handleInterceptClear = useCallback(async () => {
+    await window.api.interceptClear();
+    const s = await window.api.interceptList();
+    setInterceptRules(s.rules);
+    setInterceptAllC2sState(s.interceptAllC2s);
+    setInterceptAllS2cState(s.interceptAllS2c);
+    setHeldMessages(s.held);
+  }, []);
+
+  const handleResolveHold = useCallback(async (id: string, resolution: HoldResolution) => {
+    const r = await window.api.interceptResolve(id, resolution);
+    if (!r.ok) setStatusMsg('El hold ya fue resuelto o no existe.');
   }, []);
 
   // ——— Wizard handlers ———
@@ -388,8 +495,24 @@ export default function App(): React.ReactElement {
           running={running}
           onStart={onStart}
           onStop={onStop}
+          onRestart={onRestart}
+          onKill={onKill}
         />
-        <LogList entries={entries} />
+        <div className="center-col">
+          <InterceptBar
+            rules={interceptRules}
+            interceptAllC2s={interceptAllC2s}
+            interceptAllS2c={interceptAllS2c}
+            held={heldMessages}
+            onAddRule={handleAddRule}
+            onRemoveRule={handleRemoveRule}
+            onToggleRule={handleToggleRule}
+            onSetInterceptAll={handleSetInterceptAll}
+            onClearAll={handleInterceptClear}
+            onResolve={handleResolveHold}
+          />
+          <LogList entries={entries} />
+        </div>
         <ClientPanel
           clients={clients}
           selectedClientId={selectedClientId}

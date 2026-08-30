@@ -1,7 +1,7 @@
 {
   "name": "mcp-inspect",
   "version": "0.1.0",
-  "description": "Visualizador man-in-the-middle de conexiones MCP (read-only)",
+  "description": "Herramienta MITM de MCP: inspección, breakpoints y edición de tráfico JSON-RPC en vivo",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
@@ -11,10 +11,12 @@
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "start": "npm run build && electron .",
-    "test": "node --test --import tsx --import ./tests/dom-setup.ts tests/parser.test.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx",
+    "test": "node --test --import tsx --import ./tests/dom-setup.ts tests/parser.test.ts tests/pipeline.test.ts tests/specvalidation.test.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx",
     "test:parser": "node --test --import tsx tests/parser.test.ts",
     "test:unit": "node --test --import tsx --import ./tests/dom-setup.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx",
-    "test:proxy": "tsx tests/proxy.demo.ts"
+    "test:proxy": "tsx tests/proxy.demo.ts",
+    "test:pipeline": "node --test --import tsx tests/pipeline.test.ts tests/specvalidation.test.ts",
+    "test:client": "tsx tests/client.demo.ts"
   },
   "engines": {
     "node": ">=22.19.0"

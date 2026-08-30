@@ -15,6 +15,10 @@ interface Props {
   running: boolean;
   onStart: () => void;
   onStop: () => void;
+  /** Reiniciar el subprocess con la misma config (Phase 5). */
+  onRestart: () => void;
+  /** Matar el subprocess inmediatamente, SIGKILL (Phase 5). */
+  onKill: () => void;
 }
 
 type EditMode = 'none' | 'add' | 'edit';
@@ -32,6 +36,8 @@ export default function ServerPanel(props: Props): React.ReactElement {
     running,
     onStart,
     onStop,
+    onRestart,
+    onKill,
   } = props;
 
   const [editMode, setEditMode] = useState<EditMode>('none');
@@ -243,13 +249,17 @@ export default function ServerPanel(props: Props): React.ReactElement {
           </div>
         )}
 
-        {/* Start/Stop */}
+        {/* Start/Stop/Restart/Kill — gestor de procesos (Phase 5, feature 1c) */}
         {editMode === 'none' && (
           <div className="action-row" style={{ marginTop: 12 }}>
             {!running ? (
               <button className="btn primary" onClick={onStart} disabled={!selected} title="Iniciar el server MCP">▶ Start</button>
             ) : (
-              <button className="btn danger" onClick={onStop} title="Detener el server">■ Stop</button>
+              <>
+                <button className="btn" onClick={onRestart} title="Reiniciar el subprocess (mantiene la sesión loggeada)">↻ Reiniciar</button>
+                <button className="btn danger" onClick={onStop} title="Detener el server (SIGTERM → SIGKILL)">■ Stop</button>
+                <button className="btn danger" onClick={onKill} title="Matar inmediatamente (SIGKILL, sin gracia)">☠ Matar</button>
+              </>
             )}
           </div>
         )}

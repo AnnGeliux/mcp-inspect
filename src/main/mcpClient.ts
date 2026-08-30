@@ -3,14 +3,17 @@
  *
  * El Client del SDK hace el handshake completo (initialize → initialized)
  * sobre un Transport custom que reutiliza los wires del StdioProxy:
- *   - send() → stdin del server (el proxy no loguea raw writes)
- *   - stdout del server → onmessage del SDK (el proxy ya loguea s2c)
- * Así cada mensaje aparece exactamente una vez en la timeline del inspector.
+ *   - send() → wires.write → pipeline de interceptación → stdin del server
+ *   - deliveredS2c (stdout post-pipeline) → onmessage del SDK
+ *
+ * LOGGING CENTRALIZADO (Phase 6): el proxy loguea TODO el tráfico (c2s al
+ * resolver el pipeline, s2c al entregarse). El transport NO loguea — así
+ * cada mensaje aparece exactamente una vez en la timeline, mostrando la
+ * versión final (modificada) cuando el usuario editó un breakpoint.
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { EventEmitter } from 'events';
-import { LogEntry, Direction, JsonRpcMessage } from '../shared/types';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -25,9 +28,13 @@ import type {
 
 /** Wires expuestos por el StdioProxy para cablear el cliente. */
 export interface ProxyWires {
-  /** Escribe una línea NDJSON cruda al stdin del server (sin loguear). */
-  write: (line: string) => boolean;
-  /** Suscripción a chunks NDJSON crudos del stdout del server. Devuelve unsub. */
+  /**
+   * Escribe una línea NDJSON al stdin del server (vía pipeline de
+   * interceptación — el proxy loguea al resolverse). Puede ser async:
+   * si un breakpoint retiene el mensaje, la promesa espera la decisión.
+   */
+  write: (line: string) => boolean | Promise<boolean>;
+  /** Suscripción a chunks NDJSON entregados por el pipeline (s2c final). Devuelve unsub. */
   onData: (cb: (chunk: string) => void) => () => void;
   /** Suscripción al exit del subprocess server. Devuelve unsub. */
   onExit: (cb: () => void) => () => void;
@@ -36,7 +43,6 @@ export interface ProxyWires {
 }
 
 export interface McpClientEvents {
-  entry: (entry: LogEntry) => void;
   connected: (info: { serverName: string; serverVersion: string }) => void;
   closed: () => void;
   error: (err: Error) => void;
@@ -59,7 +65,6 @@ export declare interface McpClientController {
 export class McpClientController extends EventEmitter {
   private client: Client | null = null;
   private transport: ProxyTransport | null = null;
-  private seq = 0;
   private _connected = false;
 
   /**
@@ -75,7 +80,7 @@ export class McpClientController extends EventEmitter {
       throw new Error('proxy not running — start the server first');
     }
 
-    const transport = new ProxyTransport(wires, (dir, msg) => this.report(dir, msg));
+    const transport = new ProxyTransport(wires);
     this.transport = transport;
     this.client = new Client(clientInfo, { capabilities: {} });
 
@@ -168,13 +173,6 @@ export class McpClientController extends EventEmitter {
   private assertConnected(): void {
     if (!this.client) throw new Error('client not connected');
   }
-
-  /** Convierte un mensaje JSON-RPC en LogEntry y lo emite al renderer. */
-  private report(dir: Direction, msg: JsonRpcMessage): void {
-    const seq = ++this.seq;
-    const entry = toLogEntry(seq, dir, msg);
-    this.emit('entry', entry);
-  }
 }
 
 // __PROXY_TRANSPORT__
@@ -182,15 +180,14 @@ export class McpClientController extends EventEmitter {
 /**
  * Transport del SDK sobre los wires del StdioProxy.
  *
- * - start(): se suscribe al stdout del server → onmessage del SDK (s2c)
- * - send(): escribe al stdin del server via wires.write (c2s)
+ * - start(): se suscribe al stream entregado por el pipeline (deliveredS2c)
+ *   → onmessage del SDK (s2c final — consistente con lo que muestra el log)
+ * - send(): escribe al stdin del server via wires.write (que pasa por el
+ *   pipeline — puede quedar en hold si hay breakpoints c2s activos)
  * - close(): desuscribe (el server lo controla el proxy, no el cliente)
  *
- * NOTA anti-duplicación: el proxy ya registra TODO el tráfico s2c (stdout)
- * y c2s (via writeClientMessage). Para no duplicar entries en la timeline:
- * el transport reporta solo lo que él mismo inyecta (send → c2s) y NO el
- * stdout (que el proxy ya loguea). El onMessage s2c existe solo para el
- * SDK (protocol-level), sin emitir entries.
+ * El transport NO loguea: el proxy emite los entries (c2s al resolver el
+ * pipeline, s2c al entregar) para no duplicar en la timeline.
  */
 export class ProxyTransport implements Transport {
   private offData: (() => void) | null = null;
@@ -202,30 +199,26 @@ export class ProxyTransport implements Transport {
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
 
-  constructor(
-    private wires: ProxyWires,
-    private onMessage: (dir: Direction, msg: JsonRpcMessage) => void
-  ) {}
+  constructor(private wires: ProxyWires) {}
 
   async start(): Promise<void> {
     if (this.started) throw new Error('transport already started');
     if (!this.wires.running()) throw new Error('proxy not running');
     this.started = true;
 
-    // stdout del server → SDK client. El proxy ya loguea s2c; aquí solo
-    // alimentamos al SDK (sin emitir entry para no duplicar).
+    // s2c entregado por el pipeline → SDK client (sin loguear: el proxy ya lo hizo)
     this.offData = this.wires.onData((chunk) => {
       for (const line of chunk.split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        let msg: JsonRpcMessage;
+        let msg: JSONRPCMessage;
         try {
-          msg = JSON.parse(t) as JsonRpcMessage;
+          msg = JSON.parse(t) as JSONRPCMessage;
         } catch {
-          continue; // línea no-JSON — el proxy la trata como raw
+          continue; // línea no-JSON — ignorar
         }
         try {
-          this.onmessage?.(msg as unknown as JSONRPCMessage);
+          this.onmessage?.(msg);
         } catch (e) {
           this.onerror?.(e instanceof Error ? e : new Error(String(e)));
         }
@@ -240,9 +233,8 @@ export class ProxyTransport implements Transport {
 
   async send(message: JSONRPCMessage): Promise<void> {
     if (!this.wires.running()) throw new Error('proxy not running — cannot send');
-    // report c2s → entry en la timeline del inspector
-    this.onMessage('c2s', message as unknown as JsonRpcMessage);
-    const ok = this.wires.write(JSON.stringify(message) + '\n');
+    // Vía pipeline: puede quedar en hold hasta que el usuario resuelva.
+    const ok = await this.wires.write(JSON.stringify(message) + '\n');
     if (!ok) throw new Error('proxy write failed');
   }
 
@@ -253,49 +245,4 @@ export class ProxyTransport implements Transport {
     this.offExit?.();
     this.onclose?.();
   }
-}
-
-// __TO_LOG_ENTRY__
-
-/** Convierte un JsonRpcMessage en LogEntry (misma lógica que proxy.ts). */
-function toLogEntry(seq: number, dir: Direction, msg: JsonRpcMessage): LogEntry {
-  let kind: LogEntry['kind'];
-  let rpcId: LogEntry['rpcId'];
-  let method: string | undefined;
-  let result: unknown;
-  let error: LogEntry['error'] | undefined;
-  let params: unknown;
-
-  if ('method' in msg && !('id' in msg)) {
-    kind = 'notification';
-    rpcId = null;
-    method = msg.method;
-    params = msg.params;
-  } else if ('method' in msg && 'id' in msg) {
-    kind = 'request';
-    rpcId = msg.id ?? null;
-    method = msg.method;
-    params = msg.params;
-  } else if ('result' in msg || 'error' in msg) {
-    kind = 'error' in msg && msg.error ? 'error' : 'response';
-    rpcId = msg.id ?? null;
-    result = msg.result;
-    error = msg.error;
-  } else {
-    kind = 'notification';
-    rpcId = null;
-  }
-
-  return {
-    seq,
-    ts: new Date().toISOString(),
-    dir,
-    kind,
-    rpcId,
-    method,
-    result,
-    error,
-    params,
-    raw: JSON.stringify(msg),
-  };
 }
