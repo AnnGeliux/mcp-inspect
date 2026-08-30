@@ -201,22 +201,38 @@ export default function ServerPanel(props: Props): React.ReactElement {
           </div>
         )}
 
-        {/* Config display (when not editing) */}
+        {/* Config display — property table style (DevTools > Properties) */}
         {editMode === 'none' && selected && (
-          <>
-            <div className="endpoint-card">
-              <div className="label">Comando</div>
-              <input className="cmd-input" value={config.command} onChange={(e) => update({ command: e.target.value })} placeholder="npx" disabled={running} />
+          <div className="prop-table" role="table" aria-label="Configuración del server seleccionado">
+            <div className="prop-row" role="row">
+              <span className="prop-label" role="cell">Comando</span>
+              <span className="prop-value" role="cell">
+                <input className="prop-input" value={config.command} onChange={(e) => update({ command: e.target.value })} placeholder="npx" disabled={running} spellCheck={false} />
+              </span>
             </div>
-            <div className="endpoint-card">
-              <div className="label">Args (uno por línea)</div>
-              <textarea className="cmd-input args" value={(config.args ?? []).join('\n')} onChange={(e) => update({ args: e.target.value.split('\n').filter((s) => s.length > 0) })} placeholder={'-y\n@modelcontextprotocol/everything-server'} disabled={running} rows={4} />
+            <div className="prop-row" role="row">
+              <span className="prop-label" role="cell">Args</span>
+              <span className="prop-value" role="cell">
+                <textarea className="prop-input prop-input-textarea" value={(config.args ?? []).join('\n')} onChange={(e) => update({ args: e.target.value.split('\n').filter((s) => s.length > 0) })} placeholder={'-y\n@modelcontextprotocol/everything-server'} disabled={running} rows={4} spellCheck={false} />
+              </span>
             </div>
-            <div className="endpoint-card">
-              <div className="label">Preview</div>
-              <div className="value">{cmdStr}</div>
+            <div className="prop-row" role="row">
+              <span className="prop-label" role="cell">Preview</span>
+              <span className="prop-value" role="cell">
+                <code className="prop-code" title={cmdStr}>{truncateMiddle(cmdStr, 140)}</code>
+              </span>
             </div>
-          </>
+            {config.env && Object.keys(config.env).length > 0 && (
+              <div className="prop-row" role="row">
+                <span className="prop-label" role="cell">Env</span>
+                <span className="prop-value" role="cell">
+                  <code className="prop-code">
+                    {Object.entries(config.env).map(([k, v]) => `${k}=${v}`).join(' ')}
+                  </code>
+                </span>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Empty state */}

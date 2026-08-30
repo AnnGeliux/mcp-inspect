@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LogEntry } from '../../shared/types';
 import JsonHighlight from './JsonHighlight';
 
@@ -8,11 +8,45 @@ interface Props {
 
 type FilterType = 'all' | 'request' | 'response' | 'notification' | 'error';
 
+/** Pixels of tolerance to consider the user "at the bottom". */
+const STICKY_THRESHOLD = 24;
+
 export default function LogList({ entries }: Props): React.ReactElement {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState('');
   const [now, setNow] = useState(Date.now());
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const [showJumpBtn, setShowJumpBtn] = useState(false);
+
+  // ——— Auto-scroll: follow new entries while user is at the bottom ———
+  // NOTE: 'auto' (instant) instead of 'smooth' — smooth fires intermediate
+  // scroll events >threshold from bottom, which would flip stickiness off
+  // mid-animation and drop the follow during message bursts.
+  const entriesCount = entries.length;
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+  }, [entriesCount, filter, search]);
+
+  // Track scroll position: if the user scrolls away from the bottom, stop following.
+  const handleScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < STICKY_THRESHOLD;
+    stickToBottomRef.current = atBottom;
+    setShowJumpBtn(!atBottom && el.scrollHeight > el.clientHeight);
+  };
+
+  const jumpToBottom = () => {
+    stickToBottomRef.current = true;
+    setShowJumpBtn(false);
+    const el = listRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   // Update "now" every second for relative timestamps
   useEffect(() => {
@@ -92,7 +126,12 @@ export default function LogList({ entries }: Props): React.ReactElement {
         />
       </div>
 
-      <div className="log-list">
+      <div className="log-list" ref={listRef} onScroll={handleScroll}>
+        {showJumpBtn && (
+          <button className="jump-latest" onClick={jumpToBottom} title="Volver al último mensaje">
+            ⤓ Último
+          </button>
+        )}
         {filtered.length === 0 && entries.length === 0 && (
           <div className="empty-state">
             <span className="empty-state-icon">📜</span>

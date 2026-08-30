@@ -305,12 +305,12 @@ Texto extraído a `research/raw/features_extracted.txt` (1.571 líneas, 39 KB) c
 
 ## Archivos creados en esta tarea
 
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\tools.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\resources.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\prompts.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\roots.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\sampling.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\elicitation.html`
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\extract_features.py` (extractor reutilizable)
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\features_extracted.txt` (texto plano extraído)
-- `C:\Users\Ann Palestina\Desktop\mcp_inspect\research\raw\FEATURES_SPEC_RESUMEN.md` (este documento)
+- `research\raw\tools.html`
+- `research\raw\resources.html`
+- `research\raw\prompts.html`
+- `research\raw\roots.html`
+- `research\raw\sampling.html`
+- `research\raw\elicitation.html`
+- `research\raw\extract_features.py` (extractor reutilizable)
+- `research\raw\features_extracted.txt` (texto plano extraído)
+- `research\raw\FEATURES_SPEC_RESUMEN.md` (este documento)
