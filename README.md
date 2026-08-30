@@ -2,11 +2,6 @@
 
 **Visualizador man-in-the-middle (MITM) de conexiones MCP** — intercepta, inspecciona y depura el tráfico JSON-RPC 2.0 entre cualquier servidor MCP y cualquier cliente MCP, en tiempo real.
 
-![dark theme](https://img.shields.io/badge/theme-dark%20GitHub-0d1117-58a6ff)
-![electron](https://img.shields.io/badge/Electron-44-47848f)
-![react](https://img.shields.io/badge/React-19-61dafb)
-![tests](https://img.shields.io/badge/tests-92%20passing-3fb950)
-
 ---
 
 ## 📋 Tabla de contenidos
