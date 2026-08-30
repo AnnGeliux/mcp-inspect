@@ -282,16 +282,114 @@ npm run test:proxy
 
 ## 🗺 Roadmap
 
+> **Estado actual (auditoría ago-2026):** sniffer STDIO read-only. De las 18 features de referencia para la herramienta MITM MCP definitiva: **1 completa, 8 parciales, 9 faltantes**. Este roadmap integra las 18.
+
 ### ✅ Completado
-- **Phase 1:** STDIO MITM MVP — parser, proxy, Electron shell, UI básica
+- **Phase 1:** STDIO MITM MVP — parser NDJSON, proxy tee bidireccional, Electron shell, UI básica
 - **Phase 2:** Selectores intercambiables — cards, CRUD, persistencia
 - **Phase 3:** UX overhaul — wizard, syntax highlighting, filtros, design system
 - **Phase 4:** Tests unitarios — 92 tests cubriendo parser + componentes
+- **Cubierto fuera de fases:** búsqueda global en payload (2d) y los fragmentos ya implementados de las parciales: timeline con timestamps absolutos/relativos (2a), puente STDIO (1b), stop de procesos (1c), CRUD multi-server persistido (1d), syntax highlighting (2b), filtros por tipo (2c), export/import `.json` (5a), env vars por server (5c)
 
-### 🔜 Próximo
-- **Phase 5:** Streamable HTTP proxy — soporte para transporte HTTP+SSE (POST + SSE)
-- **Phase 6:** Comparador de sesiones — diff entre dos sesiones capturadas
-- **Phase 7:** Replay — reenviar mensajes capturados a un servidor diferente
+### 📊 Estado por categoría
+
+| # | Categoría | Hoy | Faltante principal | Fases que la cierran |
+|---|---|---|---|---|
+| 1 | Conectividad y setup | 30% | HTTP/SSE, multi-server simultáneo, auto-proxy | 5, 8, 10, 11 |
+| 2 | Monitoreo e inspección | 60% | latencia ms, visor raw + copy, filtro por método | 5 |
+| 3 | Interceptación y edición | 0% | breakpoints req/resp, mocks, replay | 6, 7, 9 |
+| 4 | Resiliencia y simulación | 0% | fault injection, throttling, validación spec | 5, 7 |
+| 5 | Persistencia y DX | 35% | `.har`, tray + atajo global, bóveda `.env` | 12 |
+
+### 🔜 Plan de fases
+
+> Esfuerzo: 🟢 días · 🟡 1–2 semanas · 🔴 3+ semanas
+
+#### Phase 5 — Observabilidad pro 🟢
+*Cierra: 2a (latencia), 2b (visor dual), 2c (filtro por método), 1c (gestor de procesos), 4c (validación spec).*
+
+- [ ] **Latencia por transacción** — correlación request↔response por `rpcId`, delta en ms visible en cada entrada
+- [ ] **Filtro por método MCP** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*` (además del filtro por tipo existente)
+- [ ] **Visor dual** — tab *Formatted* (coloreado actual) + tab *Raw* con JSON sin formato y botón copiar
+- [ ] **Gestor de procesos** — botones Reiniciar / Pausar / Matar el subprocess sin reiniciar el cliente (Claude/Cursor)
+- [ ] **Validación de spec MCP** — cada trama se valida contra los schemas zod del SDK oficial; badge visual en las no conformes
+
+*Base existente: timestamps, filtros por kind, `JsonHighlight`, stop SIGTERM→SIGKILL; el SDK ya incluye schemas zod.*
+
+#### Phase 6 — Interceptación MITM 🔴
+*Cierra: 3a (breakpoint de petición) y 3b (breakpoint de respuesta). El salto de sniffer → MITM.*
+
+- [ ] **Re-arquitectura del proxy** — de tee ciego a pipeline con hooks `onClientMessage` / `onServerMessage`, transport-agnóstico
+- [ ] **Breakpoint de petición** — pausar el c2s, editar `params`/inputSchema, reenviar alterado al server
+- [ ] **Breakpoint de respuesta** — pausar el s2c, editar `result`/`error`, liberar al cliente/LLM y evaluar su reacción
+- [ ] **UI de interceptación** — banner "⏸ interceptado", editor inline, acciones Enviar / Enviar editado / Drop / Responder manual
+- [ ] **Reglas** — breakpoints siempre, por método o condicionales; toggle global on/off
+
+*Base existente: ninguna — el proxy hoy es read-only byte a byte. Esta fase habilita las fases 7 y 9.*
+
+#### Phase 7 — Simulación de comportamiento 🟡
+*Cierra: 3c (auto-mocking), 4a (fault injection) y 4b (throttling). Construye sobre los hooks de Phase 6.*
+
+- [ ] **Auto-mocking** — mapeo método → respuesta predefinida; responde al cliente sin golpear el server real
+- [ ] **Fault injection** — inyectar errores JSON-RPC estándar: `-32601` Method Not Found, `-32602` Invalid Params, `-32603` Internal Error, timeouts
+- [ ] **Throttling** — retraso artificial configurable por método para probar cómo maneja timeouts el cliente/LLM
+- [ ] **Perfiles de simulación** — presets guardables: normal / degradado / offline
+
+#### Phase 8 — Transporte HTTP/SSE 🟡
+*Cierra: 1b (dual STDIO + SSE). Era la "Phase 5" del roadmap original.*
+
+- [ ] **Proxy Streamable HTTP** — POST (request) + GET (SSE standalone), respuesta bimodal `application/json` o `text/event-stream`
+- [ ] **Headers críticos** — `Mcp-Session-Id`, `MCP-Protocol-Version`, `Last-Event-ID` (resumabilidad por stream)
+- [ ] **Interceptación sobre ambos transports** — los hooks de Phase 6 operan igual en STDIO y HTTP
+- [ ] **Selector de transporte en la UI** — stdio / http(s) en la config del server
+
+*Base existente: parser NDJSON reutilizable para framing; el proxy HTTP es nuevo.*
+
+#### Phase 9 — Replay y comparación 🟡
+*Cierra: 3d (replay). Absorbe las "Phases 6–7" del roadmap original (diff de sesiones + replay).*
+
+- [ ] **Replay 1-click** — re-ejecutar cualquier petición capturada contra el server en vivo (o uno distinto)
+- [ ] **Replay editado** — replay + modificación, reutilizando el editor de breakpoints de Phase 6
+- [ ] **Comparador de sesiones** — diff entre dos capturas: antes/después de un fix, reportes de fallos, PRs
+
+*Base existente: export/import de sesión `.json` ya funciona.*
+
+#### Phase 10 — Multi-servidor simultáneo 🟡
+*Cierra: 1d.*
+
+- [ ] **Registry de sesiones** — proxy singleton → Map id → sesión {proxy, cliente, entries} concurrentes
+- [ ] **UI multi-sesión** — tabs o panel lateral por server, cada uno con su timeline propio
+- [ ] **Control individual** — start / stop / restart por pestaña, sin reiniciar la app
+
+*Base existente: CRUD y persistencia multi-server ya existen; hoy solo corre uno a la vez.*
+
+#### Phase 11 — Auto-proxy con 1 clic 🔴
+*Cierra: 1a.*
+
+- [ ] **Detección de clientes** — Claude Desktop (`claude_desktop_config.json`), Cursor (`mcp.json`), VS Code (`mcp.json` workspace)
+- [ ] **Reescritura automática** — injectar el proxy como intermediario de los servers configurados, sin edición manual de rutas
+- [ ] **Backup y restore** — undo 1 clic de las configs originales
+- [ ] **Aviso de reinicio** — el cliente (Claude/Cursor/VS Code) debe reiniciarse para aplicar el cambio
+
+#### Phase 12 — DX de escritorio 🟢
+*Cierra: 5a (.har), 5b (tray + atajo) y 5c (bóveda .env).*
+
+- [ ] **Export `.har`** — además del `.json` actual, formato compartible en reportes de fallos y PRs
+- [ ] **Modo tray + atajo global** — minimizar a bandeja del sistema; desplegar con Ctrl/Cmd + Shift + I
+- [ ] **Bóveda de entornos** — perfiles con API keys y credenciales cifradas (`safeStorage`), inyectadas dinámicamente al spawn
+
+*Base existente: env vars por server ya se inyectan y persisten (texto plano hoy).*
+
+### 🎯 Orden sugerido
+
+```
+5 → 6 → 7 → 8 → 10 → 9 → 11 → 12
+```
+
+- **5 y 6 pueden avanzar en paralelo** — 5 es UI-only, 6 es re-arquitectura del proxy
+- **6 y 7 son un mismo arco arquitectónico** (hooks de interceptación) — hacerlas seguidas evita rework
+- **8 puede adelantarse** si los servers remotos son la prioridad; los hooks de 6 se diseñan transport-agnóstico
+- **11 al final** — toca configs de terceros; conviene con la app estable y el backup/restore bien probado
 
 ---
 
