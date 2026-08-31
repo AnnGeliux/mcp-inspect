@@ -50,6 +50,17 @@ export interface McpClientEvents {
 
 // __MCP_CLIENT_CONTROLLER__
 
+/**
+ * Timeout de requests del cliente SDK: 10 min.
+ *
+ * Los requests pasan por el pipeline MITM antes de llegar al server — si el
+ * usuario pausa el tráfico o hay breakpoints activos, el request puede
+ * quedar en cola/hold mucho tiempo. Con el timeout corto (15s) el SDK
+ * expiraba el request en plena pausa y, al reanudar, la respuesta llegaba
+ * a un request ya muerto → "Received a response for an unknown message ID".
+ */
+const REQUEST_TIMEOUT_MS = 600_000;
+
 export declare interface McpClientController {
   on<E extends keyof McpClientEvents>(event: E, listener: McpClientEvents[E]): this;
   emit<E extends keyof McpClientEvents>(event: E, ...args: Parameters<McpClientEvents[E]>): boolean;
@@ -109,7 +120,7 @@ export class McpClientController extends EventEmitter {
   async request(method: string, params?: unknown): Promise<unknown> {
     this.assertConnected();
     const c = this.client!;
-    const opts: RequestOptions = { timeout: 15000 };
+    const opts: RequestOptions = { timeout: REQUEST_TIMEOUT_MS };
     switch (method) {
       case 'ping':
         return c.ping(opts);

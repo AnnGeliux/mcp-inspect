@@ -248,7 +248,15 @@ mcpClient.on('closed', () => {
   mainWindow?.webContents.send('client:closed');
 });
 mcpClient.on('error', (err) => {
-  mainWindow?.webContents.send('client:error', { message: err.message });
+  // "Received a response for an unknown message ID: {payload gigante}" —
+  // respuesta que llega DESPUÉS de que su request expiró (p.ej. retenido en
+  // pausa/hold más tiempo que el timeout del cliente). Se traduce corto:
+  // el payload completo ya es visible como entry s2c en el log.
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = raw.startsWith('Received a response for an unknown message ID')
+    ? 'Respuesta huérfana — el request expiró mientras estaba pausado/retenido y el server respondió después. El payload está en el log.'
+    : raw;
+  mainWindow?.webContents.send('client:error', { message });
 });
 
 // ——— helpers de sesión ————————————————————————————————————————————
