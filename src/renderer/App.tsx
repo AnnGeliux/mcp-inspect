@@ -24,6 +24,8 @@ declare global {
       stop(): Promise<{ ok: boolean }>;
       restart(): Promise<{ ok: boolean; running?: boolean; error?: string }>;
       killServer(): Promise<{ ok: boolean }>;
+      pauseServer(): Promise<{ ok: boolean; paused: boolean }>;
+      resumeServer(): Promise<{ ok: boolean; paused: boolean }>;
       write(m: JsonRpcMessage): Promise<{ ok: boolean }>;
       status(): Promise<{ running: boolean; count: number }>;
       clientRequest(method: string, params?: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>;
@@ -35,7 +37,7 @@ declare global {
       saveServers(servers: SavedServer[]): Promise<{ ok: boolean }>;
       loadClients(): Promise<SavedClient[]>;
       saveClients(clients: SavedClient[]): Promise<{ ok: boolean }>;
-      interceptList(): Promise<{ rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[] }>;
+      interceptList(): Promise<{ rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[]; paused?: boolean; queue?: { c2s: number; s2c: number } }>;
       interceptAddRule(dir: 'c2s' | 's2c', method: string): Promise<{ ok: boolean; rule?: InterceptRule }>;
       interceptRemoveRule(id: string): Promise<{ ok: boolean }>;
       interceptToggleRule(id: string, enabled: boolean): Promise<{ ok: boolean }>;
@@ -51,7 +53,7 @@ declare global {
       onClientConnected(cb: (info: { serverName: string; serverVersion: string }) => void): () => void;
       onClientClosed(cb: () => void): () => void;
       onClientError(cb: (info: { message: string }) => void): () => void;
-      onInterceptRules(cb: (state: { rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[] }) => void): () => void;
+      onInterceptRules(cb: (state: { rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[]; paused?: boolean; queue?: { c2s: number; s2c: number } }) => void): () => void;
       onInterceptHeld(cb: (held: HeldMessage) => void): () => void;
       onInterceptReleased(cb: () => void): () => void;
     };
@@ -85,6 +87,8 @@ export default function App(): React.ReactElement {
   const [interceptAllC2s, setInterceptAllC2sState] = useState(false);
   const [interceptAllS2c, setInterceptAllS2cState] = useState(false);
   const [heldMessages, setHeldMessages] = useState<HeldMessage[]>([]);
+  const [paused, setPaused] = useState(false);
+  const [pausedQueue, setPausedQueue] = useState<{ c2s: number; s2c: number }>({ c2s: 0, s2c: 0 });
 
   // Config editable del server seleccionado
   const [config, setConfig] = useState<ServerConfig>({ command: '', args: [] });
@@ -124,6 +128,7 @@ export default function App(): React.ReactElement {
       setRunning(false);
       setClientConnected(false);
       setExitInfo(info);
+      setPaused(false);
       setStatusMsg(`Server exit code=${info.code} signal=${info.signal}`);
     });
     const offError = window.api.onError((info) => setStatusMsg(`ERROR: ${info.message}`));
@@ -142,6 +147,8 @@ export default function App(): React.ReactElement {
       setInterceptAllC2sState(state.interceptAllC2s);
       setInterceptAllS2cState(state.interceptAllS2c);
       setHeldMessages(state.held);
+      if (state.paused !== undefined) setPaused(state.paused);
+      if (state.queue !== undefined) setPausedQueue(state.queue);
     });
     const offIHeld = window.api.onInterceptHeld(() => {
       void window.api.interceptList().then((s) => {
@@ -310,6 +317,24 @@ export default function App(): React.ReactElement {
     setStatusMsg('Server matado (SIGKILL).');
   }, []);
 
+  // Pausa MITM: congelar TODO el tráfico sin matar el subprocess (Phase 6)
+  const onPause = useCallback(async () => {
+    const r = await window.api.pauseServer();
+    if (r.ok) {
+      setPaused(true);
+      setStatusMsg('Tráfico pausado — el server sigue vivo.');
+    }
+  }, []);
+
+  // Resume: liberar la cola FIFO (los mensajes re-entran al pipeline)
+  const onResume = useCallback(async () => {
+    const r = await window.api.resumeServer();
+    if (r.ok) {
+      setPaused(false);
+      setStatusMsg('Tráfico reanudado — la cola fue liberada en orden.');
+    }
+  }, []);
+
   // Auto-start when both server + client are selected (once)
   useEffect(() => {
     if (
@@ -475,6 +500,12 @@ export default function App(): React.ReactElement {
         <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
         <div className="session-info">
           <span className={`pill ${running ? 'green' : 'gray'}`}>{running ? '● Capturando' : '○ Detenido'}</span>
+          {paused && <span className="pill warning" title="Tráfico congelado — el subprocess sigue vivo">⏸ Pausado</span>}
+          {paused && (pausedQueue.c2s + pausedQueue.s2c) > 0 && (
+            <span className="pill warning" title="Mensajes en cola esperando el resume">{
+              `${pausedQueue.c2s + pausedQueue.s2c} en cola (→${pausedQueue.c2s} ←${pausedQueue.s2c})`
+            }</span>
+          )}
           <span className={`pill ${clientConnected ? 'green' : 'gray'}`}>
             {clientConnected ? '● Cliente conectado' : '○ Cliente idle'}
           </span>
@@ -497,6 +528,9 @@ export default function App(): React.ReactElement {
           onStop={onStop}
           onRestart={onRestart}
           onKill={onKill}
+          paused={paused}
+          onPause={onPause}
+          onResume={onResume}
         />
         <div className="center-col">
           <InterceptBar

@@ -298,3 +298,104 @@ test('pipeline: emite held/released/rulesChanged', async () => {
   // addRule emite rulesChanged; resolver el head emite 'released' (no rulesChanged)
   assert.equal(rulesCount, 1);
 });
+
+// ——— Pausa global (congelar tráfico sin matar el subprocess) ———
+
+test('pipeline: pause encola el mensaje, resume lo entrega en orden', async () => {
+  const p = new MITMPipeline();
+  p.pause();
+
+  const p1 = p.process('c2s', { jsonrpc: '2.0', id: 30, method: 'ping' });
+  const p2 = p.process('c2s', { jsonrpc: '2.0', id: 31, method: 'ping' });
+
+  // Aún encolados: ninguna promesa resuelta
+  let resolved1 = false;
+  let resolved2 = false;
+  p1.then(() => { resolved1 = true; });
+  p2.then(() => { resolved2 = true; });
+  await sleep(10);
+  assert.equal(resolved1, false, 'p1 en cola, no entregado');
+  assert.equal(resolved2, false, 'p2 en cola, no entregado');
+  assert.equal(p.queueLengths().c2s, 2);
+
+  p.resume();
+  const r1 = await p1;
+  const r2 = await p2;
+  assert.ok(r1.msg, 'p1 entregado');
+  assert.ok(r2.msg, 'p2 entregado');
+  assert.deepEqual((r1.msg as { id: number }).id, 30, 'FIFO: p1 primero');
+  assert.deepEqual((r2.msg as { id: number }).id, 31, 'FIFO: p2 segundo');
+  assert.equal(r1.held, false, 'la pausa no es un hold');
+  assert.equal(p.queueLengths().c2s, 0);
+});
+
+test('pipeline: en pausa, el flujo con reglas no retiene — la cola gana', async () => {
+  const p = new MITMPipeline();
+  p.addRule('c2s', 'ping'); // regla activa
+  p.pause();
+
+  const promise = p.process('c2s', PING);
+  await sleep(10);
+  assert.equal(p.hasHeld, false, 'la pausa encola antes de evaluar reglas');
+  assert.equal(p.queueLengths().c2s, 1);
+
+  // resume: el mensaje re-entra al pipeline → ahora sí lo retiene la regla
+  p.resume();
+  await sleep(10);
+  assert.equal(p.hasHeld, true, 'tras resume, la regla retiene el mensaje encolado');
+  const held = p.listHeld();
+  p.resolveHold(held[0]!.id, { action: 'send' });
+  const r = await promise;
+  assert.equal(r.held, true);
+});
+
+test('pipeline: pause/resume emite pausedChanged', async () => {
+  const p = new MITMPipeline();
+  const events: boolean[] = [];
+  p.on('pausedChanged', (v) => events.push(v));
+  p.pause();
+  p.pause(); // idempotente — no debe emitir de nuevo
+  p.resume();
+  p.resume(); // idempotente
+  assert.deepEqual(events, [true, false]);
+});
+
+test('pipeline: flushAll con pausa activa libera la cola con originales', async () => {
+  const p = new MITMPipeline();
+  p.pause();
+  const promise = p.process('c2s', PING);
+  assert.equal(p.queueLengths().c2s, 1);
+
+  await p.flushAll();
+  const r = await promise;
+  assert.ok(r.msg, 'flushAll entrega el original');
+  assert.deepEqual(r.msg, PING);
+  assert.equal(p.paused, false);
+  assert.equal(p.queueLengths().c2s, 0);
+});
+
+test('pipeline: resetPause descarta la cola vieja (drop)', async () => {
+  const p = new MITMPipeline();
+  p.pause();
+  const promise = p.process('c2s', PING);
+  p.resetPause();
+  const r = await promise;
+  assert.equal(r.msg, null, 'resetPause dropea los mensajes de la sesión vieja');
+  assert.equal(p.paused, false);
+});
+
+test('pipeline: pausa no rompe la correlación id→method tras resume', async () => {
+  const p = new MITMPipeline();
+  p.pause();
+  const reqPromise = p.process('c2s', PING);
+  const respPromise = p.process('s2c', PING_RESP);
+  await sleep(10);
+  p.resume();
+  await reqPromise;
+  await respPromise;
+
+  // El request fue observado (c2s se drena primero) → la respuesta correlaciona
+  const corr = p.correlateResponse('s2c', PING_RESP);
+  assert.ok(corr, 'la correlación sobrevive a la pausa (request observado antes)');
+  assert.equal(corr!.requestMethod, 'ping');
+});

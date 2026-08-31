@@ -19,6 +19,12 @@ interface Props {
   onRestart: () => void;
   /** Matar el subprocess inmediatamente, SIGKILL (Phase 5). */
   onKill: () => void;
+  /** Pausa MITM: congelar el tráfico sin matar el subprocess. */
+  paused: boolean;
+  /** Congelar TODO el tráfico (el server sigue vivo). */
+  onPause: () => void;
+  /** Reanudar el tráfico congelado (libera la cola FIFO). */
+  onResume: () => void;
 }
 
 type EditMode = 'none' | 'add' | 'edit';
@@ -38,6 +44,9 @@ export default function ServerPanel(props: Props): React.ReactElement {
     onStop,
     onRestart,
     onKill,
+    paused,
+    onPause,
+    onResume,
   } = props;
 
   const [editMode, setEditMode] = useState<EditMode>('none');
@@ -249,7 +258,7 @@ export default function ServerPanel(props: Props): React.ReactElement {
           </div>
         )}
 
-        {/* Start/Stop/Restart/Kill — gestor de procesos (Phase 5, feature 1c) */}
+        {/* Start/Pause/Restart/Kill — gestor de procesos (Phase 5, feature 1c) */}
         {editMode === 'none' && (
           <div className="action-row" style={{ marginTop: 12 }}>
             {!running ? (
@@ -257,6 +266,11 @@ export default function ServerPanel(props: Props): React.ReactElement {
             ) : (
               <>
                 <button className="btn" onClick={onRestart} title="Reiniciar el subprocess (mantiene la sesión loggeada)">↻ Reiniciar</button>
+                {paused ? (
+                  <button className="btn primary" onClick={onResume} title="Reanudar el tráfico congelado — libera la cola en orden (FIFO)">▶ Resume</button>
+                ) : (
+                  <button className="btn warning" onClick={onPause} title="Pausar el tráfico (MITM) — el server sigue vivo, los mensajes se encolan">⏸ Pausar</button>
+                )}
                 <button className="btn danger" onClick={onStop} title="Detener el server (SIGTERM → SIGKILL)">■ Stop</button>
                 <button className="btn danger" onClick={onKill} title="Matar inmediatamente (SIGKILL, sin gracia)">☠ Matar</button>
               </>

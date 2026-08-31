@@ -330,6 +330,8 @@ input, textarea, select { font-family: inherit; }
 .btn.primary:hover:not(:disabled) { background: rgba(88, 166, 255, 0.25); }
 .btn.danger { background: var(--error-soft); color: var(--error); border-color: var(--error); }
 .btn.danger:hover:not(:disabled) { background: rgba(248, 81, 73, 0.25); }
+.btn.warning { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
+.btn.warning:hover:not(:disabled) { background: rgba(210, 153, 34, 0.25); }
 .btn.small { flex: 1; padding: 5px var(--sp-2); font-size: 11px; }
 .btn.danger-text { color: var(--error); border-color: rgba(248, 81, 73, 0.3); }
 .btn.danger-text:hover:not(:disabled) { background: var(--error-soft); border-color: var(--error); }

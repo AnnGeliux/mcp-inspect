@@ -218,6 +218,8 @@ function pushInterceptState(): void {
     interceptAllC2s: proxy.pipeline.getInterceptAll('c2s'),
     interceptAllS2c: proxy.pipeline.getInterceptAll('s2c'),
     held: proxy.pipeline.listHeld(),
+    paused: proxy.pipeline.paused,
+    queue: proxy.pipeline.queueLengths(),
   });
 }
 
@@ -227,6 +229,13 @@ proxy.pipeline.on('held', () => {
 });
 proxy.pipeline.on('released', () => {
   mainWindow?.webContents.send('intercept:released');
+  pushInterceptState();
+});
+proxy.pipeline.on('pausedChanged', () => {
+  mainWindow?.webContents.send('proxy:pausedChanged', { paused: proxy.pipeline.paused });
+  pushInterceptState();
+});
+proxy.pipeline.on('queueChanged', () => {
   pushInterceptState();
 });
 
@@ -275,6 +284,7 @@ ipcMain.handle('proxy:start', async (_evt, config: ServerConfig) => {
     sessionConfig = config;
     sessionEntries.length = 0;
     proxy.pipeline.clearCorrelation();
+    proxy.pipeline.resetPause();
 
     // spawn del server
     proxy.start(config);
@@ -301,6 +311,21 @@ ipcMain.handle('proxy:stop', async () => {
   return { ok: true };
 });
 
+/** Pausa MITM: congela TODO el tráfico sin tocar el subprocess. El server
+ * sigue vivo — los mensajes se encolan en el pipeline y fluyen al resume. */
+ipcMain.handle('proxy:pause', async () => {
+  proxy.pipeline.pause();
+  pushInterceptState();
+  return { ok: true, paused: true };
+});
+
+/** Reanuda el tráfico congelado: libera la cola FIFO por el pipeline. */
+ipcMain.handle('proxy:resume', async () => {
+  proxy.pipeline.resume();
+  pushInterceptState();
+  return { ok: true, paused: false };
+});
+
 /** Restart: stop + start con la misma config, sin limpiar la sesión loggeada. */
 ipcMain.handle('proxy:restart', async () => {
   if (!sessionConfig) return { ok: false, error: 'no session' };
@@ -314,6 +339,7 @@ ipcMain.handle('proxy:restart', async () => {
       await mcpClient.stop();
     }
     proxy.pipeline.clearCorrelation();
+    proxy.pipeline.resetPause();
     proxy.start(config);
     pushLifecycleEntry('info', `server restarted: ${config.command} ${(config.args ?? []).join(' ')}`);
     if (config.connectClient !== false) {
@@ -381,6 +407,8 @@ ipcMain.handle('intercept:list', async () => {
     interceptAllC2s: proxy.pipeline.getInterceptAll('c2s'),
     interceptAllS2c: proxy.pipeline.getInterceptAll('s2c'),
     held: proxy.pipeline.listHeld(),
+    paused: proxy.pipeline.paused,
+    queue: proxy.pipeline.queueLengths(),
   };
 });
 

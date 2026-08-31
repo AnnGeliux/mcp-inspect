@@ -20,6 +20,8 @@ const api = {
   stop: () => ipcRenderer.invoke('proxy:stop'),
   restart: () => ipcRenderer.invoke('proxy:restart'),
   killServer: () => ipcRenderer.invoke('proxy:kill'),
+  pauseServer: () => ipcRenderer.invoke('proxy:pause'),
+  resumeServer: () => ipcRenderer.invoke('proxy:resume'),
   write: (msg: JsonRpcMessage) => ipcRenderer.invoke('proxy:write', msg),
   status: () => ipcRenderer.invoke('proxy:status'),
 
@@ -47,6 +49,8 @@ const api = {
       interceptAllC2s: boolean;
       interceptAllS2c: boolean;
       held: HeldMessage[];
+      paused?: boolean;
+      queue?: { c2s: number; s2c: number };
     }>,
   interceptAddRule: (dir: 'c2s' | 's2c', method: string) =>
     ipcRenderer.invoke('intercept:addRule', { dir, method }),
@@ -100,6 +104,8 @@ const api = {
       interceptAllC2s: boolean;
       interceptAllS2c: boolean;
       held: HeldMessage[];
+      paused?: boolean;
+      queue?: { c2s: number; s2c: number };
     }) => void,
   ) => {
     const handler = (
@@ -109,6 +115,8 @@ const api = {
         interceptAllC2s: boolean;
         interceptAllS2c: boolean;
         held: HeldMessage[];
+        paused?: boolean;
+        queue?: { c2s: number; s2c: number };
       },
     ) => cb(state);
     ipcRenderer.on('intercept:rules', handler);

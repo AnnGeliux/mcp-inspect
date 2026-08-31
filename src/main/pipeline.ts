@@ -38,6 +38,10 @@ export interface PipelineEvents {
   released: (id: string) => void;
   /** Reglas cambiaron (add/remove/toggle/intercept-all/clear). */
   rulesChanged: () => void;
+  /** La pausa global cambió (congelar tráfico sin matar el subprocess). */
+  pausedChanged: (paused: boolean) => void;
+  /** La cola de pausa cambió (mensajes encolados o liberados). */
+  queueChanged: () => void;
 }
 
 export declare interface MITMPipeline {
@@ -63,6 +67,13 @@ interface RequestInfo {
   ts: number;
 }
 
+/** Mensaje en cola de pausa, esperando el resume (FIFO). */
+interface PausedItem {
+  msg: JsonRpcMessage;
+  arrivedAt: number;
+  resolve: (r: ProcessResult) => void;
+}
+
 type Dir = 'c2s' | 's2c';
 
 /** Límite de requests correlacionados por dirección (evita crecimiento infinito). */
@@ -79,6 +90,10 @@ export class MITMPipeline extends EventEmitter {
   private seq = 0;
   /** Intercept-all por dirección: si true, TODO se retiene. */
   private interceptAll: Record<Dir, boolean> = { c2s: false, s2c: false };
+  /** Pausa global: congela TODO el tráfico (sin matar el subprocess). */
+  private _paused = false;
+  /** Cola de pausa por dirección — se libera en FIFO al resume. */
+  private pausedQueue: Record<Dir, PausedItem[]> = { c2s: [], s2c: [] };
 
   // ——— Reglas ————————————————————————————————————————————————————
 
@@ -126,11 +141,20 @@ export class MITMPipeline extends EventEmitter {
     return this.heldByDir.c2s.length > 0 || this.heldByDir.s2c.length > 0;
   }
 
-  /** Elimina todas las reglas y libera todos los holds (enviando originales). */
+  /** Elimina todas las reglas, libera holds y cola de pausa, y quita la pausa. */
   async flushAll(): Promise<void> {
     for (const h of this.listHeld()) {
       this.resolveHold(h.id, { action: 'send' });
     }
+    // La cola de pausa también se libera (entrega originales, sin re-procesar).
+    const queued = [...this.pausedQueue.c2s.splice(0), ...this.pausedQueue.s2c.splice(0)];
+    for (const item of queued) {
+      item.resolve({ msg: item.msg, held: false, modified: false, heldMs: 0 });
+    }
+    if (queued.length > 0) this.emit('queueChanged');
+    const wasPaused = this._paused;
+    this._paused = false;
+    if (wasPaused) this.emit('pausedChanged', false);
     this.rules.clear();
     this.interceptAll.c2s = false;
     this.interceptAll.s2c = false;
@@ -141,6 +165,63 @@ export class MITMPipeline extends EventEmitter {
   clearCorrelation(): void {
     this.requests.c2s.clear();
     this.requests.s2c.clear();
+  }
+
+  // ——— Pausa global (congelar tráfico sin matar el subprocess) ———
+
+  /** ¿Está pausado? Los mensajes nuevos se encolan en vez de fluir. */
+  get paused(): boolean {
+    return this._paused;
+  }
+
+  /** Mensajes encolados por la pausa, por dirección. */
+  queueLengths(): { c2s: number; s2c: number } {
+    return { c2s: this.pausedQueue.c2s.length, s2c: this.pausedQueue.s2c.length };
+  }
+
+  /** Congela TODO el tráfico: cada mensaje nuevo se encola (FIFO por dirección). */
+  pause(): void {
+    if (this._paused) return;
+    this._paused = true;
+    this.emit('pausedChanged', true);
+  }
+
+  /**
+   * Reanuda el tráfico: libera la cola FIFO por dirección. Cada mensaje
+   * encolado RE-ENTRA al pipeline (con su arrivedAt original) — si coincide
+   * con una regla/breakpoint se retiene para inspección; si no, fluye tal
+   * cual. c2s se drena primero para que los requests queden correlacionados
+   * antes que sus responses.
+   */
+  resume(): void {
+    if (!this._paused) return;
+    this._paused = false;
+    const qC2s = this.pausedQueue.c2s.splice(0);
+    const qS2c = this.pausedQueue.s2c.splice(0);
+    for (const item of qC2s) {
+      void this.processNow('c2s', item.msg, item.arrivedAt).then(item.resolve);
+    }
+    for (const item of qS2c) {
+      void this.processNow('s2c', item.msg, item.arrivedAt).then(item.resolve);
+    }
+    this.emit('pausedChanged', false);
+    if (qC2s.length + qS2c.length > 0) this.emit('queueChanged');
+  }
+
+  /**
+   * Reinicia el estado de pausa para una sesión nueva: la cola vieja se
+   * descarta (resolve con drop — el server anterior ya no existe) y el flag
+   * queda en false.
+   */
+  resetPause(): void {
+    const queued = [...this.pausedQueue.c2s.splice(0), ...this.pausedQueue.s2c.splice(0)];
+    const wasPaused = this._paused;
+    this._paused = false;
+    for (const item of queued) {
+      item.resolve({ msg: null, held: false, modified: false, heldMs: 0 });
+    }
+    if (queued.length > 0) this.emit('queueChanged');
+    if (wasPaused) this.emit('pausedChanged', false);
   }
 
   // ——— Correlación id→{method, ts} ————————————————————————————
@@ -195,6 +276,18 @@ export class MITMPipeline extends EventEmitter {
    * El write al destino lo hace el CALLER (proxy.ts) cuando la promesa resuelve.
    */
   process(dir: Dir, msg: JsonRpcMessage, arrivedAt = Date.now()): Promise<ProcessResult> {
+    // Pausa global: encolar en vez de procesar (el subprocess sigue vivo).
+    if (this._paused) {
+      return new Promise<ProcessResult>((resolve) => {
+        this.pausedQueue[dir].push({ msg, arrivedAt, resolve });
+        this.emit('queueChanged');
+      });
+    }
+    return this.processNow(dir, msg, arrivedAt);
+  }
+
+  /** Procesamiento real (sin pausa): observado + match de reglas + hold. */
+  private processNow(dir: Dir, msg: JsonRpcMessage, arrivedAt: number): Promise<ProcessResult> {
     this.observeRequest(dir, msg, arrivedAt);
 
     const ruleId = this.matchRule(dir, msg);
