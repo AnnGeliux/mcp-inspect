@@ -506,9 +506,6 @@ export default function App(): React.ReactElement {
               `${pausedQueue.c2s + pausedQueue.s2c} en cola (→${pausedQueue.c2s} ←${pausedQueue.s2c})`
             }</span>
           )}
-          <span className={`pill ${clientConnected ? 'green' : 'gray'}`}>
-            {clientConnected ? '● Cliente conectado' : '○ Cliente idle'}
-          </span>
           <span className="pill">{entries.length} mensajes</span>
           {exitInfo && <span className="pill">exit code={exitInfo.code}</span>}
         </div>
