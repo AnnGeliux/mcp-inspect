@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { InterceptRule, HeldMessage, JsonRpcMessage } from '../../shared/types';
+import { InterceptRule, HeldMessage, JsonRpcMessage, SimulationConfig } from '../../shared/types';
 
 interface Props {
   rules: InterceptRule[];
   interceptAllC2s: boolean;
   interceptAllS2c: boolean;
   held: HeldMessage[];
-  onAddRule: (dir: 'c2s' | 's2c', method: string) => void;
+  onAddRule: (dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig) => void;
   onRemoveRule: (id: string) => void;
   onToggleRule: (id: string, enabled: boolean) => void;
   onSetInterceptAll: (dir: 'c2s' | 's2c', on: boolean) => void;
@@ -32,11 +32,35 @@ const METHOD_SUGGESTIONS = [
   'elicitation/create',
 ];
 
+/** Errores JSON-RPC estándar para fault injection. */
+const FAULT_PRESETS = [
+  { code: -32601, label: '-32601 Method not found' },
+  { code: -32602, label: '-32602 Invalid params' },
+  { code: -32603, label: '-32603 Internal error' },
+  { code: -32600, label: '-32600 Invalid request' },
+  { code: -32700, label: '-32700 Parse error' },
+  { code: -32001, label: '-32001 Request timeout' },
+];
+
+type SimType = 'hold' | 'fault' | 'mock' | 'throttle';
+
+/** Pill corta para el tipo de simulación de una regla. */
+function simBadge(r: InterceptRule): React.ReactElement | null {
+  const s = r.simulation;
+  if (!s) return null;
+  if (s.type === 'fault') return <span className="pill danger" title={`Fault injection: error ${'faultCode' in s ? s.faultCode ?? -32603 : -32603}`}>⚡ fault</span>;
+  if (s.type === 'mock') return <span className="pill purple" title="Auto-mock: respuesta predeterminada, no golpea el destino">🧪 mock</span>;
+  if (s.type === 'throttle') return <span className="pill warning" title={`Throttling: +${'throttleMs' in s ? s.throttleMs : 0} ms`}>🕒 {('throttleMs' in s ? s.throttleMs : 0)}ms</span>;
+  return null;
+}
+
 /**
- * InterceptBar — barra de interceptación MITM (Phase 6).
+ * InterceptBar — barra de interceptación MITM (Phase 6+7).
  *
  * - Toggles intercept-all por dirección (c2s = pausar peticiones, s2c = pausar respuestas).
- * - Reglas por método: añadir/quitar/toggle.
+ * - Reglas por método con simulación opcional (Phase 7):
+ *     hold (breakpoint clásico) · fault (error JSON-RPC) · mock (respuesta
+ *     predeterminada) · throttle (retraso artificial).
  * - Holds activos: editor inline JSON + Enviar / Enviar editado / Drop / Responder.
  */
 export default function InterceptBar(props: Props): React.ReactElement {
@@ -55,13 +79,35 @@ export default function InterceptBar(props: Props): React.ReactElement {
 
   const [newRuleDir, setNewRuleDir] = useState<'c2s' | 's2c'>('c2s');
   const [newRuleMethod, setNewRuleMethod] = useState('');
+  const [newRuleSim, setNewRuleSim] = useState<SimType>('hold');
+  const [faultCode, setFaultCode] = useState(-32601);
+  const [faultMessage, setFaultMessage] = useState('');
+  const [throttleMs, setThrottleMs] = useState(2000);
+  const [mockResult, setMockResult] = useState('{}');
   const [showRules, setShowRules] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const active = interceptAllC2s || interceptAllS2c || rules.some((r) => r.enabled) || held.length > 0;
 
+  const mockResultValid = (() => {
+    try {
+      JSON.parse(mockResult);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  const addRule = (): void => {
+    let simulation: SimulationConfig | undefined;
+    if (newRuleSim === 'fault') simulation = { type: 'fault', faultCode, ...(faultMessage ? { faultMessage } : {}) };
+    else if (newRuleSim === 'mock' && mockResultValid) simulation = { type: 'mock', mockResult: JSON.parse(mockResult) };
+    else if (newRuleSim === 'throttle') simulation = { type: 'throttle', throttleMs: Math.max(0, throttleMs) };
+    onAddRule(newRuleDir, newRuleMethod, simulation);
+  };
+
   const draftOf = (h: HeldMessage): string => {
-    if (drafts[h.id] !== undefined) return drafts[h.id];
+    if (drafts[h.id] !== undefined) return drafts[h.id]!;
     return JSON.stringify(h.msg, null, 2);
   };
 
@@ -126,7 +172,53 @@ export default function InterceptBar(props: Props): React.ReactElement {
                 </option>
               ))}
             </select>
-            <button className="btn small" onClick={() => onAddRule(newRuleDir, newRuleMethod)}>
+            <select className="cmd-input sim-type" value={newRuleSim} onChange={(e) => setNewRuleSim(e.target.value as SimType)} title="Acción al coincidir la regla">
+              <option value="hold">⏸ breakpoint</option>
+              <option value="fault">⚡ fault (error)</option>
+              <option value="mock">🧪 mock (respuesta fija)</option>
+              <option value="throttle">🕒 throttle (retraso)</option>
+            </select>
+            {newRuleSim === 'fault' && (
+              <>
+                <select className="cmd-input sim-code" value={faultCode} onChange={(e) => setFaultCode(Number(e.target.value))} title="Código de error JSON-RPC">
+                  {FAULT_PRESETS.map((f) => (
+                    <option key={f.code} value={f.code}>{f.label}</option>
+                  ))}
+                </select>
+                <input
+                  className="cmd-input sim-msg"
+                  value={faultMessage}
+                  onChange={(e) => setFaultMessage(e.target.value)}
+                  placeholder="mensaje (opcional)"
+                  title="Mensaje del error inyectado"
+                />
+              </>
+            )}
+            {newRuleSim === 'mock' && (
+              <input
+                className={`cmd-input sim-mock ${mockResultValid ? '' : 'invalid'}`}
+                value={mockResult}
+                onChange={(e) => setMockResult(e.target.value)}
+                placeholder='JSON del "result" a entregar'
+                title='Contenido JSON que se entregará como result al cliente'
+              />
+            )}
+            {newRuleSim === 'throttle' && (
+              <input
+                className="cmd-input sim-ms"
+                type="number"
+                min={0}
+                value={throttleMs}
+                onChange={(e) => setThrottleMs(Number(e.target.value))}
+                title="Retraso artificial en ms"
+              />
+            )}
+            <button
+              className="btn small"
+              onClick={addRule}
+              disabled={newRuleSim === 'mock' && !mockResultValid}
+              title="Añadir la regla"
+            >
               + Añadir
             </button>
           </div>
@@ -141,6 +233,7 @@ export default function InterceptBar(props: Props): React.ReactElement {
                   </label>
                   <span className={`dir ${r.dir === 'c2s' ? 'c2s' : 's2c'}`}>{r.dir === 'c2s' ? '→' : '←'}</span>
                   <span className="method mono">{r.method === '' ? '(todos)' : r.method}</span>
+                  {simBadge(r)}
                   <button className="card-action-btn" onClick={() => onRemoveRule(r.id)} title="Eliminar regla">
                     ✕
                   </button>
@@ -194,3 +287,4 @@ export default function InterceptBar(props: Props): React.ReactElement {
     </section>
   );
 }
+

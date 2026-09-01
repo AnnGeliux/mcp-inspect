@@ -12,6 +12,7 @@ import {
   InterceptRule,
   HeldMessage,
   HoldResolution,
+  SimulationConfig,
 } from '../shared/types';
 
 const api = {
@@ -52,12 +53,14 @@ const api = {
       paused?: boolean;
       queue?: { c2s: number; s2c: number };
     }>,
-  interceptAddRule: (dir: 'c2s' | 's2c', method: string) =>
-    ipcRenderer.invoke('intercept:addRule', { dir, method }),
+  interceptAddRule: (dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig) =>
+    ipcRenderer.invoke('intercept:addRule', { dir, method, simulation }),
   interceptRemoveRule: (id: string) =>
     ipcRenderer.invoke('intercept:removeRule', { id }),
   interceptToggleRule: (id: string, enabled: boolean) =>
     ipcRenderer.invoke('intercept:toggleRule', { id, enabled }),
+  interceptSetRuleSimulation: (id: string, simulation: SimulationConfig | null) =>
+    ipcRenderer.invoke('intercept:setRuleSimulation', { id, simulation }),
   interceptSetInterceptAll: (dir: 'c2s' | 's2c', on: boolean) =>
     ipcRenderer.invoke('intercept:setInterceptAll', { dir, on }),
   interceptResolve: (id: string, resolution: HoldResolution) =>

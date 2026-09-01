@@ -218,6 +218,9 @@ export default function LogList({ entries }: Props): React.ReactElement {
                 {e.held && <span className="pill warning" title={`Retenido ${e.heldMs ?? 0} ms`}>⏸</span>}
                 {e.modified && <span className="pill purple" title="Modificado por el usuario">✎</span>}
                 {e.dropped && <span className="pill danger" title="Descartado — nunca llegó a destino">✕</span>}
+                {e.simulated === 'fault' && <span className="pill danger" title="Fault injection — error JSON-RPC inyectado por regla">⚡ fault</span>}
+                {e.simulated === 'mock' && <span className="pill purple" title="Auto-mock — respuesta sintética, el destino real no fue golpeado">🧪 mock</span>}
+                {e.simulated === 'throttle' && <span className="pill warning" title={`Throttling — retraso artificial de ${e.heldMs ?? 0} ms`}>🕒 {e.heldMs ?? 0}ms</span>}
                 <span className={`status ${e.error ? 'err' : ''}`}>
                   {e.error ? `code ${e.error.code}` : status(e)}
                 </span>

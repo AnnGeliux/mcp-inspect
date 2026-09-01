@@ -14,6 +14,7 @@ import {
   InterceptRule,
   HeldMessage,
   HoldResolution,
+  SimulationConfig,
 } from '../shared/types';
 
 // Tipo del bridge expuesto por preload.ts via contextBridge.
@@ -38,7 +39,7 @@ declare global {
       loadClients(): Promise<SavedClient[]>;
       saveClients(clients: SavedClient[]): Promise<{ ok: boolean }>;
       interceptList(): Promise<{ rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[]; paused?: boolean; queue?: { c2s: number; s2c: number } }>;
-      interceptAddRule(dir: 'c2s' | 's2c', method: string): Promise<{ ok: boolean; rule?: InterceptRule }>;
+      interceptAddRule(dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig): Promise<{ ok: boolean; rule?: InterceptRule }>;
       interceptRemoveRule(id: string): Promise<{ ok: boolean }>;
       interceptToggleRule(id: string, enabled: boolean): Promise<{ ok: boolean }>;
       interceptSetInterceptAll(dir: 'c2s' | 's2c', on: boolean): Promise<{ ok: boolean }>;
@@ -396,9 +397,9 @@ export default function App(): React.ReactElement {
     }
   }, []);
 
-  // ——— Intercept handlers (Phase 6) ———
-  const handleAddRule = useCallback((dir: 'c2s' | 's2c', method: string) => {
-    void window.api.interceptAddRule(dir, method);
+  // ——— Intercept handlers (Phase 6+7) ———
+  const handleAddRule = useCallback((dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig) => {
+    void window.api.interceptAddRule(dir, method, simulation);
   }, []);
 
   const handleRemoveRule = useCallback((id: string) => {

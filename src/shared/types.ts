@@ -75,6 +75,8 @@ export interface LogEntry {
   modified?: boolean;
   /** true si el mensaje fue descartado por el usuario (nunca llegó a su destino). */
   dropped?: boolean;
+  /** Simulación aplicada por una regla (fault injection / auto-mock / throttle). */
+  simulated?: 'fault' | 'mock' | 'throttle';
 }
 
 /** Resultado compacto de validación contra la spec MCP (via schemas zod del SDK). */
@@ -150,6 +152,21 @@ export interface SessionExport {
   entries: LogEntry[];
 }
 
+/**
+ * Simulación asociada a una regla (Phase 7).
+ * - 'hold': breakpoint clásico — retiene y espera decisión del usuario.
+ * - 'throttle': entrega el original tras `throttleMs` de retraso artificial.
+ * - 'fault': descarta el mensaje y entrega una respuesta de error JSON-RPC
+ *   al cliente (generada con el id del request original).
+ * - 'mock': descarta el mensaje y entrega `mockResult`/`mockError` al
+ *   cliente sin golpear el destino real.
+ */
+export type SimulationConfig =
+  | { type: 'hold' }
+  | { type: 'throttle'; throttleMs: number }
+  | { type: 'fault'; faultCode?: number; faultMessage?: string }
+  | { type: 'mock'; mockResult?: unknown; mockError?: JsonRpcError };
+
 /** Una regla de interceptación activa en el proxy. */
 export interface InterceptRule {
   /** ID único. */
@@ -160,6 +177,8 @@ export interface InterceptRule {
   method: string;
   /** true = regla activa. */
   enabled: boolean;
+  /** Simulación a aplicar al coincidir (default 'hold' — comportamiento Phase 6). */
+  simulation?: SimulationConfig;
 }
 
 /** Un mensaje retenido por un breakpoint, esperando decisión del usuario. */

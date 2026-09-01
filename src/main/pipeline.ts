@@ -29,7 +29,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { InterceptRule, HeldMessage, JsonRpcMessage, HoldResolution } from '../shared/types';
+import { InterceptRule, HeldMessage, JsonRpcMessage, JsonRpcResponse, JsonRpcError, HoldResolution, SimulationConfig } from '../shared/types';
 
 export interface PipelineEvents {
   /** Un mensaje fue retenido por un breakpoint. */
@@ -59,6 +59,15 @@ export interface ProcessResult {
   modified: boolean;
   /** ms que estuvo retenido. */
   heldMs: number;
+  /**
+   * Respuesta sintética para el CLIENTE (solo simulaciones c2s fault/mock):
+   * el mensaje original se descarta del flujo hacia el server y esta
+   * respuesta se entrega al cliente en su lugar. El proxy la emite como
+   * deliveredS2c + entry.
+   */
+  syntheticResponse?: JsonRpcMessage;
+  /** Simulación aplicada (para el badge del entry en el log). */
+  simulated?: 'fault' | 'mock' | 'throttle';
 }
 
 /** Info de un request observado, para correlacionar su respuesta. */
@@ -97,12 +106,22 @@ export class MITMPipeline extends EventEmitter {
 
   // ——— Reglas ————————————————————————————————————————————————————
 
-  addRule(dir: Dir, method: string): InterceptRule {
+  addRule(dir: Dir, method: string, simulation?: SimulationConfig): InterceptRule {
     const id = `rule-${++this.seq}`;
-    const rule: InterceptRule = { id, dir, method, enabled: true };
+    const rule: InterceptRule = { id, dir, method, enabled: true, ...(simulation ? { simulation } : {}) };
     this.rules.set(id, rule);
     this.emit('rulesChanged');
     return rule;
+  }
+
+  /** Asigna/cambia la simulación de una regla existente. */
+  setRuleSimulation(id: string, simulation: SimulationConfig | null): void {
+    const r = this.rules.get(id);
+    if (r) {
+      if (simulation === null) delete r.simulation;
+      else r.simulation = simulation;
+      this.emit('rulesChanged');
+    }
   }
 
   removeRule(id: string): void {
@@ -286,13 +305,30 @@ export class MITMPipeline extends EventEmitter {
     return this.processNow(dir, msg, arrivedAt);
   }
 
-  /** Procesamiento real (sin pausa): observado + match de reglas + hold. */
+  /** Procesamiento real (sin pausa): observado + match de reglas + hold/simulación. */
   private processNow(dir: Dir, msg: JsonRpcMessage, arrivedAt: number): Promise<ProcessResult> {
     this.observeRequest(dir, msg, arrivedAt);
 
     const ruleId = this.matchRule(dir, msg);
     if (ruleId === null) {
       return Promise.resolve({ msg, held: false, modified: false, heldMs: 0 });
+    }
+
+    const rule = ruleId === '__all__' ? null : this.rules.get(ruleId) ?? null;
+    const sim = rule?.simulation;
+
+    // Phase 7 — simulaciones automáticas (fault/mock/throttle), sin hold.
+    if (sim) {
+      if (sim.type === 'throttle') {
+        return this.applyThrottle(dir, msg, sim.throttleMs, arrivedAt, ruleId);
+      }
+      if (sim.type === 'fault') {
+        return Promise.resolve(this.applyFault(dir, msg, sim, ruleId));
+      }
+      if (sim.type === 'mock') {
+        return Promise.resolve(this.applyMock(dir, msg, sim, ruleId));
+      }
+      // sim.type === 'hold' → cae al hold clásico de abajo.
     }
 
     const id = `held-${++this.seq}-${arrivedAt}`;
@@ -311,6 +347,103 @@ export class MITMPipeline extends EventEmitter {
 
     this.emit('held', held);
     return p;
+  }
+
+  /** Throttle: entrega el original tras `ms` de retraso artificial. */
+  private applyThrottle(
+    dir: Dir,
+    msg: JsonRpcMessage,
+    ms: number,
+    arrivedAt: number,
+    ruleId: string,
+  ): Promise<ProcessResult> {
+    const delay = Math.max(0, ms);
+    return new Promise<ProcessResult>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          msg,
+          held: false,
+          modified: false,
+          heldMs: Math.max(0, Date.now() - arrivedAt),
+          simulated: 'throttle',
+        });
+        void ruleId; // matchRule ya decidió — solo informativo aquí.
+      }, delay);
+    });
+  }
+
+  /**
+   * Fault injection: el mensaje se descarta y se genera una respuesta de
+   * error JSON-RPC para el CLIENTE con el id del request original.
+   * - c2s (request del cliente): el server nunca lo ve; el cliente recibe el error.
+   * - s2c (response real del server): se reemplaza por el error.
+   * - Notifications (sin id): no hay a quién responder → drop puro.
+   */
+  private applyFault(
+    dir: Dir,
+    msg: JsonRpcMessage,
+    sim: { type: 'fault'; faultCode?: number; faultMessage?: string },
+    _ruleId: string,
+  ): ProcessResult {
+    const response = this.buildSyntheticResponse(dir, msg, {
+      error: { code: sim.faultCode ?? -32603, message: sim.faultMessage ?? 'Injected fault (mcp-inspect)' },
+    });
+    if (response === null) {
+      // Notification o mensaje sin id: nada que responder — drop puro.
+      return { msg: null, held: false, modified: false, heldMs: 0, simulated: 'fault' };
+    }
+    if (dir === 'c2s') {
+      // El request no llega al server; la respuesta sintética va al cliente.
+      return { msg: null, held: false, modified: true, heldMs: 0, syntheticResponse: response, simulated: 'fault' };
+    }
+    // s2c: la respuesta real se reemplaza por el error hacia el cliente.
+    return { msg: response, held: false, modified: true, heldMs: 0, simulated: 'fault' };
+  }
+
+  /**
+   * Auto-mock: el mensaje se descarta y se entrega mockResult/mockError al
+   * cliente sin golpear el destino real. Igual que fault pero con payload
+   * definido por el usuario.
+   */
+  private applyMock(
+    dir: Dir,
+    msg: JsonRpcMessage,
+    sim: { type: 'mock'; mockResult?: unknown; mockError?: JsonRpcError },
+    _ruleId: string,
+  ): ProcessResult {
+    const response = this.buildSyntheticResponse(dir, msg, {
+      result: sim.mockError ? undefined : sim.mockResult,
+      error: sim.mockError,
+    });
+    if (response === null) {
+      return { msg: null, held: false, modified: false, heldMs: 0, simulated: 'mock' };
+    }
+    if (dir === 'c2s') {
+      return { msg: null, held: false, modified: true, heldMs: 0, syntheticResponse: response, simulated: 'mock' };
+    }
+    return { msg: response, held: false, modified: true, heldMs: 0, simulated: 'mock' };
+  }
+
+  /**
+   * Construye una respuesta JSON-RPC sintética para el mensaje dado.
+   * Respondable = cualquier mensaje con `id` no null:
+   * - requests del cliente (c2s) → el cliente espera respuesta con ese id.
+   * - responses del server (s2c) → se reemplazan conservando su id.
+   * Los requests iniciados por el SERVER (s2c, ej. sampling/createMessage)
+   * NO son respondables — reemplazarlos con una response confundiría al
+   * cliente → drop puro. Notifications (sin id) → drop puro.
+   */
+  private buildSyntheticResponse(
+    dir: Dir,
+    msg: JsonRpcMessage,
+    payload: { result?: unknown; error?: JsonRpcError },
+  ): JsonRpcMessage | null {
+    if (!('id' in msg) || msg.id == null) return null; // notification / id nulo
+    if (dir === 's2c' && 'method' in msg) return null; // request iniciado por el server
+    const response: JsonRpcResponse = { jsonrpc: '2.0', id: msg.id };
+    if (payload.error) response.error = payload.error;
+    else response.result = payload.result;
+    return response;
   }
 
   /** ¿Coincide alguna regla (activa) con este mensaje? ruleId o null. */

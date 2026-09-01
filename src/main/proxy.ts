@@ -139,6 +139,7 @@ export class StdioProxy extends EventEmitter {
         heldMs: result.heldMs,
         modified: result.modified,
         dropped: true,
+        simulated: result.simulated,
       });
       return;
     }
@@ -151,6 +152,7 @@ export class StdioProxy extends EventEmitter {
       held: result.held,
       heldMs: result.heldMs,
       modified: result.modified,
+      simulated: result.simulated,
     });
 
     const chunk = JSON.stringify(result.msg) + '\n';
@@ -186,13 +188,19 @@ export class StdioProxy extends EventEmitter {
     const result = await this.pipeline.process('c2s', msg);
 
     if (result.msg === null) {
-      // dropped por el usuario
+      // dropped por el usuario o por simulación (fault/mock c2s)
       this.emitMessage('c2s', msg, line0, {
         held: result.held,
         heldMs: result.heldMs,
         modified: result.modified,
         dropped: true,
+        simulated: result.simulated,
       });
+      // Simulación c2s (fault/mock): entregar la respuesta sintética al
+      // cliente — el server nunca vio el request.
+      if (result.syntheticResponse) {
+        this.deliverSyntheticToClient(result.syntheticResponse, result.simulated);
+      }
       return false;
     }
 
@@ -206,8 +214,27 @@ export class StdioProxy extends EventEmitter {
       held: result.held,
       heldMs: result.heldMs,
       modified: result.modified,
+      simulated: result.simulated,
     });
     return true;
+  }
+
+  /**
+   * Entrega una respuesta sintética al cliente (fault/mock c2s): log entry
+   * s2c + chunk deliveredS2c. La correlación de latencia se calcula contra
+   * el request original observado por el pipeline.
+   */
+  private deliverSyntheticToClient(response: JsonRpcMessage, simulated?: 'fault' | 'mock' | 'throttle'): void {
+    const arrivedAt = Date.now();
+    const corr = this.pipeline.correlateResponse('s2c', response, arrivedAt);
+    this.emitMessage('s2c', response, undefined, {
+      latencyMs: corr?.latencyMs,
+      requestMethod: corr?.requestMethod,
+      modified: true,
+      simulated,
+    });
+    const chunk = JSON.stringify(response) + '\n';
+    this.emit('deliveredS2c', chunk);
   }
 
   /** Mata el proceso amablemente: cierra stdin, espera exit, luego SIGKILL. */
@@ -313,6 +340,7 @@ export class StdioProxy extends EventEmitter {
       heldMs?: number;
       modified?: boolean;
       dropped?: boolean;
+      simulated?: 'fault' | 'mock' | 'throttle';
     },
   ): void {
     const seq = ++this.seq;

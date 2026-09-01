@@ -32,6 +32,7 @@ import {
   SavedServer,
   SavedClient,
   HoldResolution,
+  SimulationConfig,
 } from '../shared/types';
 import { loadServers as loadServersImpl, saveServers as saveServersImpl, loadClients as loadClientsImpl, saveClients as saveClientsImpl } from './persistence';
 
@@ -420,8 +421,8 @@ ipcMain.handle('intercept:list', async () => {
   };
 });
 
-ipcMain.handle('intercept:addRule', async (_evt, args: { dir: 'c2s' | 's2c'; method: string }) => {
-  const rule = proxy.pipeline.addRule(args.dir, args.method);
+ipcMain.handle('intercept:addRule', async (_evt, args: { dir: 'c2s' | 's2c'; method: string; simulation?: SimulationConfig }) => {
+  const rule = proxy.pipeline.addRule(args.dir, args.method, args.simulation);
   return { ok: true, rule };
 });
 
@@ -432,6 +433,11 @@ ipcMain.handle('intercept:removeRule', async (_evt, args: { id: string }) => {
 
 ipcMain.handle('intercept:toggleRule', async (_evt, args: { id: string; enabled: boolean }) => {
   proxy.pipeline.toggleRule(args.id, args.enabled);
+  return { ok: true };
+});
+
+ipcMain.handle('intercept:setRuleSimulation', async (_evt, args: { id: string; simulation: SimulationConfig | null }) => {
+  proxy.pipeline.setRuleSimulation(args.id, args.simulation);
   return { ok: true };
 });
 
