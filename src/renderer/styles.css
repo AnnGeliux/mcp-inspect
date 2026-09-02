@@ -971,51 +971,66 @@ input, textarea, select { font-family: inherit; }
 /* ——— Session tabs (multi-server, M1) ————————————————————— */
 .session-tabs {
   display: flex;
-  gap: var(--sp-1, 4px);
-  align-items: center;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border, #21262d);
+  gap: var(--sp-1);
+  align-items: stretch;
+  padding: var(--sp-1) var(--sp-2) 0 var(--sp-2);
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  overflow-y: hidden;
   flex-shrink: 0;
 }
 .session-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border: 1px solid var(--border, #21262d);
-  border-radius: var(--r-sm, 6px);
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   background: transparent;
   font-size: 11px;
   color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
+  min-width: 0;
+  overflow: hidden;
 }
 .session-tab:hover { background: rgba(88, 166, 255, 0.08); }
 .session-tab.active {
   color: var(--text);
   border-color: var(--accent);
-  background: rgba(88, 166, 255, 0.12);
+  border-bottom: 2px solid var(--bg-soft);
+  background: var(--bg-soft);
+  margin-bottom: -1px; /* merge the tab's bottom edge into the bar's border */
 }
-.tab-dot { font-size: 9px; line-height: 1; }
+.tab-dot { font-size: 9px; line-height: 1; flex-shrink: 0; }
 .tab-dot.live { color: var(--success); }
 .tab-dot.stopped { color: var(--text-dim); }
 .tab-dot.paused { color: var(--warning); font-size: 10px; }
-.tab-name { font-weight: 600; }
+.tab-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  min-width: 0;
+}
 .tab-kind {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-dim);
-  border: 1px solid var(--border, #21262d);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 6px;
+  flex-shrink: 0;
 }
 .tab-queued {
   font-size: 9px;
   font-weight: 700;
   color: var(--warning);
+  flex-shrink: 0;
 }
 .tab-close {
   border: none;
@@ -1023,7 +1038,8 @@ input, textarea, select { font-family: inherit; }
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 2px 4px;
   line-height: 1;
+  flex-shrink: 0;
 }
 .tab-close:hover { color: var(--error); }
