@@ -206,6 +206,9 @@ export default function LogList({ entries }: Props): React.ReactElement {
         onClick={() => toggle(e.seq)}
       >
         <div className="bubble-meta">
+          <span className={`bubble-origin ${side}`} title={e.dir === 'c2s' ? 'Cliente → Server' : 'Server → Cliente'}>
+            {e.dir === 'c2s' ? '▲' : '●'}
+          </span>
           <span className="log-toggle">{isOpen ? '▾' : '▸'}</span>
           <span className="method">
             <span className="m">
@@ -408,13 +411,11 @@ export default function LogList({ entries }: Props): React.ReactElement {
         />
       </div>
 
+      {/* Contenedor scroll: el botón Último es sticky DENTRO de este scroll,
+          no un hermano del contenido — así no rompe el layout flex del chat. */}
       <div className="log-list chat" ref={listRef} onScroll={handleScroll}>
-        {showJumpBtn && (
-          <button className="jump-latest" onClick={jumpToBottom} title="Volver al último mensaje">
-            ⤓ Último
-          </button>
-        )}
-        {filtered.length === 0 && entries.length === 0 && (
+        <div className="chat-content">
+          {filtered.length === 0 && entries.length === 0 && (
           <div className="empty-state">
             <span className="empty-state-icon">📜</span>
             <span className="empty-state-text">
@@ -434,6 +435,19 @@ export default function LogList({ entries }: Props): React.ReactElement {
           </div>
         )}
         {groups.map((g) => (g.type === 'solo' ? renderBubble(g.solo!) : renderTx(g)))}
+        </div>
+        {/* Botón flotante sticky dentro del scroll — no rompe el layout flex del chat */}
+        {showJumpBtn && (
+          <div className="jump-latest">
+            <button
+              className="jump-latest-btn"
+              onClick={jumpToBottom}
+              title="Volver al último mensaje"
+            >
+              ⤓ Último
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );

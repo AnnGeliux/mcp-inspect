@@ -515,11 +515,16 @@ input, textarea, select { font-family: inherit; }
 .log-list { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
 
 /* ——— Vista chat (reemplaza el timeline): transacciones + burbujas ——— */
-.log-list.chat {
-  padding: var(--sp-3) var(--sp-4);
+/* El contenedor SOLO hace scroll/padding; el layout flex vive en .chat-content.
+   Así el botón Último (sticky) y los cambios de altura al expandir no
+   desacomodan el layout ni el scroll del chat. */
+.log-list.chat { padding: var(--sp-3) var(--sp-4) 0; }
+
+.chat-content {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  padding-bottom: var(--sp-4); /* breathing room al fondo */
 }
 
 /** Bloque de transacción: request↔response correlacionados. */
@@ -546,18 +551,40 @@ input, textarea, select { font-family: inherit; }
 }
 
 /** Burbuja: cliente (request) a la derecha, server (response) a la izquierda. */
+/* Diferenciación sólida (tema B): fondos tintados por origen —
+   azul = mensaje del CLIENTE (▲), morado = mensaje del SERVER (●). */
 .log-entry.bubble {
-  border: none; border-radius: var(--r-lg);
-  background: var(--bg-card);
+  border: 1px solid transparent; border-radius: var(--r-lg);
   cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast);
   padding: 6px var(--sp-2);
   max-width: 92%;
 }
 .log-entry.bubble.right { align-self: flex-end; border-top-right-radius: var(--r-sm); }
 .log-entry.bubble.left { align-self: flex-start; border-top-left-radius: var(--r-sm); }
-.log-entry.bubble.right:hover { background: rgba(88, 166, 255, 0.1); }
-.log-entry.bubble.left:hover { background: rgba(188, 140, 255, 0.1); }
-.log-entry.bubble.expanded { background: var(--bg); border: 1px solid var(--border-strong); }
+
+/* Fondos tintados por dirección */
+.log-entry.bubble.right { background: rgba(88, 166, 255, 0.13); }
+.log-entry.bubble.left { background: rgba(188, 140, 255, 0.13); }
+.log-entry.bubble.right:hover { background: rgba(88, 166, 255, 0.22); }
+.log-entry.bubble.left:hover { background: rgba(188, 140, 255, 0.22); }
+
+/* Borde sutil del mismo tono para reforzar la lectura */
+.log-entry.bubble.right { border-color: rgba(88, 166, 255, 0.28); }
+.log-entry.bubble.left { border-color: rgba(188, 140, 255, 0.28); }
+
+/* Expandida: ancho completo del bloque (crece hacia abajo, alineada) —
+   el preview nunca desplaza a las demás burbujas de lado. */
+.log-entry.bubble.expanded {
+  background: var(--bg); border-color: var(--border-strong);
+  max-width: 100%; align-self: stretch;
+}
+
+/* Icono de origen: ▲ cliente (azul), ● server (morado) */
+.bubble-origin { font-size: 10px; user-select: none; }
+.bubble-origin.right { color: var(--accent); }
+.bubble-origin.left { color: var(--purple); }
+/* En notif/técnicos (grises) el icono acompaña el tono apagado */
+.log-entry.bubble.notif .bubble-origin, .log-entry.bubble.tech .bubble-origin { color: var(--text-dim); }
 
 .log-entry.bubble.err {
   background: var(--error-soft); border: 1px solid rgba(248, 81, 73, 0.4);
@@ -871,16 +898,33 @@ input, textarea, select { font-family: inherit; }
   white-space: pre-wrap;
   user-select: text;
 }/* ===== Jump-to-latest floating button (log panel) ===== */
+/* Sticky dentro del contenedor de scroll (.log-list.chat). El chip se apoya
+   en una "pista" invisible de altura fija al final del contenido: ocupa todo
+   el ancho (height 0 + overflow visible) para no crear scroll horizontal ni
+   desplazar las burbujas, y el botón visible flota a la derecha. */
 .jump-latest {
   position: sticky;
   bottom: 14px;
-  left: calc(100% - 110px);
-  width: 92px;
+  z-index: 10;
+  height: 0;
+  overflow: visible;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+}
+.jump-latest .jump-latest-btn {
+  pointer-events: auto;
+  position: absolute;
+  right: var(--sp-3);
+  bottom: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-bottom: 6px;
   background: var(--accent);
   color: #0d1117;
   border: none;
@@ -891,9 +935,8 @@ input, textarea, select { font-family: inherit; }
   font-family: inherit;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  z-index: 10;
   animation: fade-in 0.15s ease-out;
 }
-.jump-latest:hover {
+.jump-latest .jump-latest-btn:hover {
   background: #79b8ff;
 }
