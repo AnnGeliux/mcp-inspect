@@ -514,51 +514,105 @@ input, textarea, select { font-family: inherit; }
 
 .log-list { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
 
-.log-entry {
-  border-bottom: 1px solid var(--bg-soft);
-  cursor: pointer; transition: background var(--t-fast);
-}
-.log-entry:hover { background: var(--bg-soft); }
-.log-entry.expanded { background: var(--bg-card); }
-
-.log-entry-header {
-  display: grid;
-  grid-template-columns: 16px 130px 70px 1fr 80px;
-  gap: var(--sp-2); padding: var(--sp-2) var(--sp-4);
-  align-items: center;
+/* ——— Vista chat (reemplaza el timeline): transacciones + burbujas ——— */
+.log-list.chat {
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
-.log-toggle {
-  color: var(--text-dim); font-size: 10px; user-select: none;
-  transition: color var(--t-fast);
+/** Bloque de transacción: request↔response correlacionados. */
+.tx-block {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-soft);
+  overflow: hidden;
 }
-.log-entry:hover .log-toggle { color: var(--accent); }
+.tx-header {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 6px var(--sp-3);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.tx-header .method { color: var(--text); }
+.tx-header .method .m { font-weight: 600; }
+.tx-header .method .id { color: var(--text-dim); margin-left: var(--sp-2); font-size: 11px; }
+.tx-waiting { color: var(--text-dim); font-style: italic; font-size: 10px; margin-left: auto; animation: pulse 2s ease-in-out infinite; }
+.tx-msgs {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
+/** Burbuja: cliente (request) a la derecha, server (response) a la izquierda. */
+.log-entry.bubble {
+  border: none; border-radius: var(--r-lg);
+  background: var(--bg-card);
+  cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast);
+  padding: 6px var(--sp-2);
+  max-width: 92%;
+}
+.log-entry.bubble.right { align-self: flex-end; border-top-right-radius: var(--r-sm); }
+.log-entry.bubble.left { align-self: flex-start; border-top-left-radius: var(--r-sm); }
+.log-entry.bubble.right:hover { background: rgba(88, 166, 255, 0.1); }
+.log-entry.bubble.left:hover { background: rgba(188, 140, 255, 0.1); }
+.log-entry.bubble.expanded { background: var(--bg); border: 1px solid var(--border-strong); }
+
+.log-entry.bubble.err {
+  background: var(--error-soft); border: 1px solid rgba(248, 81, 73, 0.4);
+}
+.log-entry.bubble.err:hover { background: rgba(248, 81, 73, 0.15); }
+
+/* Notifications y técnicos: burbujas sueltas grises/reducidas */
+.log-entry.bubble.notif, .log-entry.bubble.tech {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  max-width: 78%;
+}
+.log-entry.bubble.notif:hover, .log-entry.bubble.tech:hover { color: var(--text); border-color: var(--border-strong); }
+.log-entry.bubble.notif .method .m, .log-entry.bubble.tech .method .m { color: var(--text-dim); font-weight: 500; }
+
+/* Header interno de la burbuja: método + id + badges + status */
+.bubble-meta {
+  display: flex; align-items: center; gap: var(--sp-2);
+  flex-wrap: wrap;
+}
 
 .log-entry .ts { color: var(--text-dim); font-size: 11px; }
 .log-entry .ts-rel { color: var(--text-dim); opacity: 0.7; font-size: 10px; }
-
-.log-entry .dir {
-  font-weight: 600; text-align: center;
-  padding: 2px var(--sp-1); border-radius: var(--r-sm);
-  font-size: 10px; align-self: center;
-}
-.log-entry .dir.c2s { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
-.log-entry .dir.s2c { background: rgba(188, 140, 255, 0.2); color: var(--purple); }
-.log-entry .dir.notif { background: var(--warning-soft); color: var(--warning); }
-.log-entry .dir.err { background: var(--error-soft); color: var(--error); }
 
 .log-entry .method { color: var(--text); }
 .log-entry .method .m { font-weight: 600; }
 .log-entry .method .id { color: var(--text-dim); margin-left: var(--sp-2); font-size: 11px; }
 
-.log-entry .status { color: var(--text-dim); text-align: right; font-size: 11px; }
+.log-entry .status { color: var(--text-dim); text-align: right; font-size: 11px; margin-left: auto; }
 .log-entry .status.err { color: var(--error); }
+
+.log-entry.bubble.err .method .m { color: var(--error); }
+
+/* Payload plegado de la burbuja (2 líneas, click expande inline) */
+.bubble-snippet {
+  margin-top: 4px; padding: 4px 6px;
+  font-size: 11px; line-height: 1.45;
+  color: var(--text-dim);
+  background: var(--bg);
+  border-radius: var(--r-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-height: calc(2 * 1.45em + 8px);
+  user-select: none;
+}
+.log-entry.bubble.expanded .bubble-snippet { display: none; }
 
 .log-entry .preview {
   padding: var(--sp-2) var(--sp-3);
   background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--r-md); margin: 0 var(--sp-3) var(--sp-2);
+  border-radius: var(--r-md); margin: var(--sp-2) 0 0;
   max-height: 300px; overflow-y: auto;
+  max-width: 100%;
 }
 
 /* ═══════════════════════════════════════════════════════════════
