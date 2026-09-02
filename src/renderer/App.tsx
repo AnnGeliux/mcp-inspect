@@ -127,7 +127,7 @@ export default function App(): React.ReactElement {
   const activeEntries = (selectedServerId && sessionEntries[selectedServerId]) || [];
   const exitInfo = (selectedServerId && exitInfoMap[selectedServerId]) ?? null;
   const clientConnected = Boolean(selectedServerId && clientConnectedMap[selectedServerId]);
-  const serverInfo = (selectedServerId && serverInfoMap[selectedServerId]) ?? null;
+  const serverInfo = selectedServerId ? (serverInfoMap[selectedServerId] ?? null) : null;
 
   /** Refreshes the active tab's intercept state from main. */
   const refreshIntercept = useCallback(async () => {
@@ -630,6 +630,26 @@ export default function App(): React.ReactElement {
           />
           <LogList entries={activeEntries} />
         </div>
+        <ClientPanel
+          clients={clients}
+          selectedClientId={selectedClientId}
+          onSelectClient={handleSelectClient}
+          onAddClient={handleAddClient}
+          onUpdateClient={handleUpdateClient}
+          onDeleteClient={handleDeleteClient}
+          clientConnected={clientConnected}
+          serverInfo={serverInfo}
+          lastToolResult={lastToolResult}
+          hasSelection={hasSelection}
+          onPing={onPing}
+          onListTools={onListTools}
+          onCallEcho={onCallEcho}
+          onCallLongRunning={onCallLongRunning}
+          onSendRaw={onSendRaw}
+          onClientRestart={onClientRestart}
+          onExport={onExport}
+          onImport={onImport}
+        />
       </div>
       <footer className="status">
         <div className="status-left">{statusMsg}</div>
