@@ -1,15 +1,15 @@
 /**
- * MCP Client real (SDK oficial) cableado al proxy MITM.
+ * Real MCP client (official SDK) wired to the MITM proxy.
  *
- * El Client del SDK hace el handshake completo (initialize → initialized)
- * sobre un Transport custom que reutiliza los wires del StdioProxy:
- *   - send() → wires.write → pipeline de interceptación → stdin del server
- *   - deliveredS2c (stdout post-pipeline) → onmessage del SDK
+ * The SDK Client performs the full handshake (initialize → initialized)
+ * over a custom Transport that reuses the StdioProxy's wires:
+ *   - send() → wires.write → interception pipeline → server stdin
+ *   - deliveredS2c (post-pipeline stdout) → SDK onmessage
  *
- * LOGGING CENTRALIZADO (Phase 6): el proxy loguea TODO el tráfico (c2s al
- * resolver el pipeline, s2c al entregarse). El transport NO loguea — así
- * cada mensaje aparece exactamente una vez en la timeline, mostrando la
- * versión final (modificada) cuando el usuario editó un breakpoint.
+ * CENTRALIZED LOGGING (Phase 6): the proxy logs ALL traffic (c2s when the
+ * pipeline resolves, s2c on delivery). The transport does NOT log — this
+ * way each message appears exactly once in the timeline, showing the
+ * final (modified) version when the user edited a breakpoint.
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -26,19 +26,19 @@ import type {
   ReadResourceRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 
-/** Wires expuestos por el StdioProxy para cablear el cliente. */
+/** Wires exposed by the StdioProxy for hooking up the client. */
 export interface ProxyWires {
   /**
-   * Escribe una línea NDJSON al stdin del server (vía pipeline de
-   * interceptación — el proxy loguea al resolverse). Puede ser async:
-   * si un breakpoint retiene el mensaje, la promesa espera la decisión.
+   * Writes an NDJSON line to the server's stdin (via the interception
+   * pipeline — the proxy logs on resolution). Can be async: if a
+   * breakpoint holds the message, the promise waits for the decision.
    */
   write: (line: string) => boolean | Promise<boolean>;
-  /** Suscripción a chunks NDJSON entregados por el pipeline (s2c final). Devuelve unsub. */
+  /** Subscription to NDJSON chunks delivered by the pipeline (final s2c). Returns an unsub. */
   onData: (cb: (chunk: string) => void) => () => void;
-  /** Suscripción al exit del subprocess server. Devuelve unsub. */
+  /** Subscription to the server subprocess exit. Returns an unsub. */
   onExit: (cb: () => void) => () => void;
-  /** ¿Server vivo? */
+  /** Is the server alive? */
   running: () => boolean;
 }
 
@@ -51,13 +51,13 @@ export interface McpClientEvents {
 // __MCP_CLIENT_CONTROLLER__
 
 /**
- * Timeout de requests del cliente SDK: 10 min.
+ * Timeout for SDK client requests: 10 min.
  *
- * Los requests pasan por el pipeline MITM antes de llegar al server — si el
- * usuario pausa el tráfico o hay breakpoints activos, el request puede
- * quedar en cola/hold mucho tiempo. Con el timeout corto (15s) el SDK
- * expiraba el request en plena pausa y, al reanudar, la respuesta llegaba
- * a un request ya muerto → "Received a response for an unknown message ID".
+ * Requests pass through the MITM pipeline before reaching the server — if
+ * the user pauses traffic or there are active breakpoints, the request can
+ * stay queued/held for a long time. With the short timeout (15s) the SDK
+ * expired the request mid-pause and, on resume, the response arrived to
+ * an already-dead request → "Received a response for an unknown message ID".
  */
 const REQUEST_TIMEOUT_MS = 600_000;
 
@@ -67,10 +67,10 @@ export declare interface McpClientController {
 }
 
 /**
- * Controla un Client MCP real del SDK, cableado al proxy en vez de spawner
- * su propio subprocess. Ciclo:
+ * Controls a real MCP Client from the SDK, wired to the proxy instead of
+ * spawning its own subprocess. Cycle:
  *   connectToProxy(wires) → client.connect(transport) → initialize handshake
- *   request/notify       → métodos MCP arbitrarios
+ *   request/notify       → arbitrary MCP methods
  *   stop()               → close
  */
 export class McpClientController extends EventEmitter {
@@ -79,8 +79,8 @@ export class McpClientController extends EventEmitter {
   private _connected = false;
 
   /**
-   * Cablea el cliente SDK a los wires del proxy y ejecuta el handshake MCP
-   * (initialize → initialized). El server ya debe estar corriendo via
+   * Wires the SDK client to the proxy's wires and runs the MCP handshake
+   * (initialize → initialized). The server must already be running via
    * proxy.start().
    */
   async connectToProxy(wires: ProxyWires, clientInfo: { name: string; version: string }): Promise<void> {
@@ -113,9 +113,9 @@ export class McpClientController extends EventEmitter {
   }
 
   /**
-   * Request MCP. Despacha a los métodos tipados del SDK Client — cada uno
-   * pasa su resultSchema correcto (mandar undefined al request() interno
-   * rompe safeParse). Para métodos arbitrarios: envío raw del proxy.
+   * MCP request. Dispatches to the typed SDK Client methods — each one
+   * passes its correct resultSchema (sending undefined to the internal
+   * request() breaks safeParse). For arbitrary methods: raw proxy send.
    */
   async request(method: string, params?: unknown): Promise<unknown> {
     this.assertConnected();
@@ -141,7 +141,7 @@ export class McpClientController extends EventEmitter {
     }
   }
 
-  /** Notification MCP genérica (sin id → sin respuesta esperada). */
+  /** Generic MCP notification (no id → no response expected). */
   async notify(method: string, params?: unknown): Promise<void> {
     this.assertConnected();
     const c = this.client as unknown as {
@@ -154,7 +154,7 @@ export class McpClientController extends EventEmitter {
     return this._connected;
   }
 
-  /** Info del server tras el handshake (capabilities, nombre, versión). */
+  /** Server info after the handshake (capabilities, name, version). */
   getServerInfo(): {
     name?: string;
     version?: string;
@@ -189,16 +189,16 @@ export class McpClientController extends EventEmitter {
 // __PROXY_TRANSPORT__
 
 /**
- * Transport del SDK sobre los wires del StdioProxy.
+ * SDK Transport over the StdioProxy's wires.
  *
- * - start(): se suscribe al stream entregado por el pipeline (deliveredS2c)
- *   → onmessage del SDK (s2c final — consistente con lo que muestra el log)
- * - send(): escribe al stdin del server via wires.write (que pasa por el
- *   pipeline — puede quedar en hold si hay breakpoints c2s activos)
- * - close(): desuscribe (el server lo controla el proxy, no el cliente)
+ * - start(): subscribes to the stream delivered by the pipeline (deliveredS2c)
+ *   → SDK onmessage (final s2c — consistent with what the log shows)
+ * - send(): writes to the server's stdin via wires.write (which goes through
+ *   the pipeline — may stay on hold if there are active c2s breakpoints)
+ * - close(): unsubscribes (the server is controlled by the proxy, not the client)
  *
- * El transport NO loguea: el proxy emite los entries (c2s al resolver el
- * pipeline, s2c al entregar) para no duplicar en la timeline.
+ * The transport does NOT log: the proxy emits the entries (c2s when the
+ * pipeline resolves, s2c on delivery) to avoid duplicates in the timeline.
  */
 export class ProxyTransport implements Transport {
   private offData: (() => void) | null = null;
@@ -217,7 +217,7 @@ export class ProxyTransport implements Transport {
     if (!this.wires.running()) throw new Error('proxy not running');
     this.started = true;
 
-    // s2c entregado por el pipeline → SDK client (sin loguear: el proxy ya lo hizo)
+    // s2c delivered by the pipeline → SDK client (no logging: the proxy already did it)
     this.offData = this.wires.onData((chunk) => {
       for (const line of chunk.split('\n')) {
         const t = line.trim();
@@ -226,7 +226,7 @@ export class ProxyTransport implements Transport {
         try {
           msg = JSON.parse(t) as JSONRPCMessage;
         } catch {
-          continue; // línea no-JSON — ignorar
+          continue; // non-JSON line — ignore
         }
         try {
           this.onmessage?.(msg);
@@ -236,7 +236,7 @@ export class ProxyTransport implements Transport {
       }
     });
 
-    // exit del server → cierre del transport
+    // server exit → transport closure
     this.offExit = this.wires.onExit(() => {
       this.onclose?.();
     });
@@ -244,7 +244,7 @@ export class ProxyTransport implements Transport {
 
   async send(message: JSONRPCMessage): Promise<void> {
     if (!this.wires.running()) throw new Error('proxy not running — cannot send');
-    // Vía pipeline: puede quedar en hold hasta que el usuario resuelva.
+    // Via the pipeline: may stay on hold until the user resolves.
     const ok = await this.wires.write(JSON.stringify(message) + '\n');
     if (!ok) throw new Error('proxy write failed');
   }

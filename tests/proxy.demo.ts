@@ -1,9 +1,9 @@
 /**
- * Demo end-to-end del StdioProxy.
+ * End-to-end demo of the StdioProxy.
  *
- * Spawn un subprocess Node "echo MCP" que responde a initialize y tools/list.
- * El proxy captura stdout (NDJSON) y stderr. El demo escribe un initialize
- * request y verifica que recibe la respuesta como LogEntry.
+ * Spawns a Node subprocess ("echo MCP") that responds to initialize and tools/list.
+ * The proxy captures stdout (NDJSON) and stderr. The demo writes an initialize
+ * request and verifies it receives the response as a LogEntry.
  *
  * Ejecutar: npm run test:proxy
  */
@@ -11,8 +11,8 @@
 import { StdioProxy } from '../src/main/proxy';
 import { LogEntry } from '../src/shared/types';
 
-// Subprocess de prueba: un mini "MCP server" que responde initialize, ping,
-// y notifications/initialized.
+// Test subprocess: a mini "MCP server" responding to initialize, ping,
+// and notifications/initialized.
 const ECHO_NODE = `
 process.stdin.setEncoding('utf8');
 let buf = '';
@@ -49,7 +49,7 @@ process.stdin.on('data', (chunk) => {
         }
       }) + '\\n');
     } else if ('method' in msg && !('id' in msg)) {
-      // notification — no respondemos
+      // notification — we don't respond
     }
   }
 });
@@ -70,7 +70,7 @@ async function main() {
   proxy.on('exit', (code, signal) => console.log(`\n[proxy] exit code=${code} signal=${signal}`));
   proxy.on('error', (err) => console.error(`[proxy error] ${err.message}`));
 
-  // 1. Iniciar subprocess
+  // 1. Start the subprocess
   console.log('[1] Spawning echo-server…');
   proxy.start({
     command: process.execPath, // node
@@ -78,7 +78,7 @@ async function main() {
   });
   await sleep(150);
 
-  // 2. Cliente → server: initialize
+  // 2. Client → server: initialize
   console.log('\n[2] Sending initialize (id=1)…');
   const ok1 = proxy.writeClientMessage({
     jsonrpc: '2.0',
@@ -89,17 +89,17 @@ async function main() {
   if (!ok1) throw new Error('writeClientMessage failed for initialize');
   await sleep(150);
 
-  // 3. Cliente → server: initialized notification
+  // 3. Client → server: initialized notification
   console.log('[3] Sending notifications/initialized (no id)…');
   proxy.writeClientMessage({ jsonrpc: '2.0', method: 'notifications/initialized' });
   await sleep(50);
 
-  // 4. Cliente → server: tools/list
+  // 4. Client → server: tools/list
   console.log('[4] Sending tools/list (id=2)…');
   proxy.writeClientMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   await sleep(150);
 
-  // 5. Cliente → server: ping
+  // 5. Client → server: ping
   console.log('[5] Sending ping (id=3)…');
   proxy.writeClientMessage({ jsonrpc: '2.0', id: 3, method: 'ping' });
   await sleep(150);
@@ -108,36 +108,36 @@ async function main() {
   console.log('\n[6] Stopping proxy…');
   await proxy.stop(2000);
 
-  // 7. Verificaciones
-  console.log('\n=== Verificaciones ===');
+  // 7. Verifications
+  console.log('\n=== Verifications ===');
   let pass = 0, fail = 0;
   function check(name: string, ok: boolean, detail = '') {
     if (ok) { console.log(`  ✓ ${name}${detail ? ' — ' + detail : ''}`); pass++; }
     else    { console.log(`  ✗ ${name}${detail ? ' — ' + detail : ''}`); fail++; }
   }
-  check('Hubo al menos 8 entries (4 c2s + 3 s2c response + 1 stderr + 1 notification)',
+  check('At least 8 entries (4 c2s + 3 s2c responses + 1 stderr + 1 notification)',
     entries.length >= 8, `got ${entries.length}`);
 
   const initializeResp = entries.find((e) => e.dir === 's2c' && e.rpcId === 1 && (e.result !== undefined || e.error !== undefined));
-  check('initialize response recibida', !!initializeResp, initializeResp?.result ? JSON.stringify(initializeResp.result).slice(0, 80) + '…' : 'missing');
+  check('initialize response received', !!initializeResp, initializeResp?.result ? JSON.stringify(initializeResp.result).slice(0, 80) + '…' : 'missing');
 
   const initializedNotif = entries.find((e) => e.method === 'notifications/initialized');
   check('notifications/initialized logged', !!initializedNotif);
 
   const toolsListResp = entries.find((e) => e.dir === 's2c' && e.rpcId === 2 && (e.result as any)?.tools);
-  check('tools/list response recibida con 2 tools',
+  check('tools/list response received with 2 tools',
     !!toolsListResp && Array.isArray((toolsListResp.result as any)?.tools) && (toolsListResp.result as any).tools.length === 2);
 
   const pingResp = entries.find((e) => e.dir === 's2c' && e.rpcId === 3);
-  check('ping response recibida', !!pingResp);
+  check('ping response received', !!pingResp);
 
   const stderrEntry = entries.find((e) => e.stderr);
-  check('stderr capturado separado del canal MCP', !!stderrEntry);
+  check('stderr captured separately from the MCP channel', !!stderrEntry);
 
   const c2sCount = entries.filter((e) => e.dir === 'c2s').length;
   const s2cCount = entries.filter((e) => e.dir === 's2c' && !e.stderr && e.method !== '[proxy]').length;
-  check('4 mensajes c2s (initialize + initialized + tools/list + ping)', c2sCount === 4, `got ${c2sCount}`);
-  check('3 mensajes s2c con respuesta (initialize + tools/list + ping)', s2cCount === 3, `got ${s2cCount}`);
+  check('4 c2s messages (initialize + initialized + tools/list + ping)', c2sCount === 4, `got ${c2sCount}`);
+  check('3 s2c messages with responses (initialize + tools/list + ping)', s2cCount === 3, `got ${s2cCount}`);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

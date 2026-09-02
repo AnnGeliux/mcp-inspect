@@ -1,5 +1,5 @@
 /**
- * Tests del parser NDJSON. Ejecutar con: npm test
+ * NDJSON parser tests. Run with: npm test
  *
  * Spec MCP: "Messages are delimited by newlines, and MUST NOT contain embedded newlines."
  */
@@ -65,10 +65,10 @@ test('NdjsonParser: feed con múltiples líneas en un chunk', () => {
 test('NdjsonParser: feed incremental (línea llega partida)', () => {
   const p = new NdjsonParser();
   const msg = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' });
-  // Cortamos en el medio
+  // Split it in the middle
   const half = Math.floor(msg.length / 2);
   const out1 = p.feed(msg.slice(0, half));
-  assert.equal(out1.length, 0); // aún incompleta
+  assert.equal(out1.length, 0); // still incomplete
   assert.equal(p.pending, msg.slice(0, half));
   const out2 = p.feed(msg.slice(half) + '\n');
   assert.equal(out2.length, 1);
@@ -111,6 +111,6 @@ test('NdjsonParser: flujo realista de initialize handshake', () => {
   assert.equal(out[0]!.method, 'initialize');
   assert.equal((out[1] as any).result.serverInfo.name, 'test');
   assert.equal(out[2]!.method, 'notifications/initialized');
-  // El notification no debe tener id
+  // The notification must not have an id
   assert.equal('id' in out[2]!, false);
 });

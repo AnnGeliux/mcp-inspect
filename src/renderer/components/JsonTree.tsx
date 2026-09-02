@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 
 /**
- * Vista de árbol JSON con resaltado de campos clave (id, method, params, result, error).
- * Campos clave: color accent. Strings: verde. Numbers/null: púrpura. Object/Array: colapsable.
+ * JSON tree view with key-field highlighting (id, method, params, result, error).
+ * Key fields: accent color. Strings: green. Numbers/null: purple. Object/Array: collapsible.
  */
 
 const KEY_HIGHLIGHT = new Set(['id', 'method', 'params', 'result', 'error', 'jsonrpc', 'code', 'message']);
@@ -21,7 +21,7 @@ function render(value: unknown, key: string, depth: number, expanded: Set<string
   const entries = isArr
     ? (value as unknown[]).map((v, i) => [String(i), v] as const)
     : Object.entries(value as Record<string, unknown>);
-  const isOpen = depth < 2 || expanded.has(pathKey); // primeros 2 niveles siempre abiertos
+  const isOpen = depth < 2 || expanded.has(pathKey); // first 2 levels always open
   return (
     <div className="jt-node">
       <span
@@ -30,8 +30,8 @@ function render(value: unknown, key: string, depth: number, expanded: Set<string
           const next = new Set(expanded);
           if (next.has(pathKey)) next.delete(pathKey); else next.add(pathKey);
           // hack: re-render via state mutation isn't clean; toggle via React state needed for full impl.
-          // Aquí usamos un truco simple: alternamos atributo data- y re-render manual sería costoso.
-          // Mejor solución: usar estado por componente. Como es leaf-ish, aceptamos toggle básico por ahora.
+          // Here we use a simple trick: we alternate a data- attribute and manual re-render would be costly.
+          // Better solution: use per-component state. Since this is leaf-ish, we accept a basic toggle for now.
           const el = document.querySelector(`[data-jt-path="${cssEscape(pathKey)}"]`);
           if (el) el.classList.toggle('jt-collapsed');
         }}

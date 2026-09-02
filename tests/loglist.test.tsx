@@ -95,7 +95,7 @@ test('LogList: empty state when no entries', () => {
   );
   const empty = container.querySelector('.empty-state');
   assert.ok(empty, 'should show empty state');
-  assert.ok(text(empty).includes('tráfico') || text(empty).includes('Inicia'), 'should show waiting message');
+  assert.ok(text(empty).includes('traffic') || text(empty).includes('Start'), 'should show waiting message');
   cleanup();
 });
 
@@ -233,6 +233,6 @@ test('LogList: "no results" state when search matches nothing', () => {
 
   const noResults = container.querySelector('.empty-state');
   assert.ok(noResults, 'should show no-results empty state');
-  assert.ok(text(noResults).includes('Sin resultados'), 'should show "Sin resultados" message');
+  assert.ok(text(noResults).includes('No results'), 'should show "No results" message');
   cleanup();
 });

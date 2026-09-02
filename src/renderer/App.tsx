@@ -17,7 +17,7 @@ import {
   SimulationConfig,
 } from '../shared/types';
 
-// Tipo del bridge expuesto por preload.ts via contextBridge.
+// Type of the bridge exposed by preload.ts via contextBridge.
 declare global {
   interface Window {
     api: {
@@ -32,6 +32,8 @@ declare global {
       clientRequest(method: string, params?: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>;
       clientNotify(method: string, params?: unknown): Promise<{ ok: boolean; error?: string }>;
       clientStatus(): Promise<{ connected: boolean; server: { name?: string; version?: string; capabilities?: unknown } | null }>;
+      clientRestart(): Promise<{ ok: boolean; error?: string }>;
+      appVersion(): Promise<string>;
       exportSession(): Promise<{ ok: boolean; filePath?: string; error?: string }>;
       importSession(): Promise<{ ok: boolean; count?: number; error?: string }>;
       loadServers(): Promise<SavedServer[]>;
@@ -69,7 +71,9 @@ export default function App(): React.ReactElement {
   const [serverInfo, setServerInfo] = useState<{ name?: string; version?: string; capabilities?: unknown } | null>(null);
   const [lastToolResult, setLastToolResult] = useState<LogEntry | null>(null);
   const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string>('Listo. Selecciona un server y un client.');
+  const [statusMsg, setStatusMsg] = useState<string>('Ready. Select a server and a client to start.');
+  // App version (semver MAJOR.MINOR.PATCH — package.json)
+  const [appVersion, setAppVersion] = useState<string>('');
 
   // ——— Persisted servers/clients ———
   const [servers, setServers] = useState<SavedServer[]>([]);
@@ -91,7 +95,7 @@ export default function App(): React.ReactElement {
   const [paused, setPaused] = useState(false);
   const [pausedQueue, setPausedQueue] = useState<{ c2s: number; s2c: number }>({ c2s: 0, s2c: 0 });
 
-  // Config editable del server seleccionado
+  // Editable config of the selected server
   const [config, setConfig] = useState<ServerConfig>({ command: '', args: [] });
 
   const hasSelection = selectedServerId !== null && selectedClientId !== null;
@@ -100,12 +104,14 @@ export default function App(): React.ReactElement {
   // ——— Load persisted servers/clients on mount ———
   useEffect(() => {
     void (async () => {
-      const [loadedServers, loadedClients] = await Promise.all([
+      const [loadedServers, loadedClients, version] = await Promise.all([
         window.api.loadServers(),
         window.api.loadClients(),
+        window.api.appVersion(),
       ]);
       setServers(loadedServers);
       setClients(loadedClients);
+      setAppVersion(version);
       // Auto-select first server and first client if available
       if (loadedServers.length > 0) {
         setSelectedServerId(loadedServers[0]!.id);
@@ -135,12 +141,12 @@ export default function App(): React.ReactElement {
     const offError = window.api.onError((info) => setStatusMsg(`ERROR: ${info.message}`));
     const offConn = window.api.onClientConnected((info) => {
       setClientConnected(true);
-      setStatusMsg(`Cliente conectado a ${info.serverName} v${info.serverVersion} — handshake completo.`);
+      setStatusMsg(`Client connected to ${info.serverName} v${info.serverVersion} — handshake complete.`);
       void window.api.clientStatus().then((s) => setServerInfo(s.server));
     });
     const offClosed = window.api.onClientClosed(() => {
       setClientConnected(false);
-      setStatusMsg('Cliente desconectado.');
+      setStatusMsg('Client disconnected.');
     });
     const offCError = window.api.onClientError((info) => setStatusMsg(`CLIENT ERROR: ${info.message}`));
     const offIRules = window.api.onInterceptRules((state) => {
@@ -288,51 +294,54 @@ export default function App(): React.ReactElement {
     setEntries([]);
     setExitInfo(null);
     setLastToolResult(null);
-    setStatusMsg('Spawn del server + handshake del cliente…');
+    setStatusMsg('Spawning server + client handshake…');
     const r = await window.api.start(config);
     setRunning(r.running);
     if (!r.ok) {
-      setStatusMsg(`Falló al iniciar: ${r.error ?? 'unknown'}`);
+      setStatusMsg(`Failed to start: ${r.error ?? 'unknown'}`);
     }
   }, [config]);
 
-  const onStop = useCallback(async () => {
-    await window.api.stop();
-  }, []);
-
-  // Reiniciar el subprocess con la misma config (Phase 5)
+  // Restart the subprocess with the same config (Phase 5)
   const onRestart = useCallback(async () => {
-    setStatusMsg('Reiniciando server…');
+    setStatusMsg('Restarting server…');
     const r = await window.api.restart();
     if (r.ok) {
       setRunning(r.running ?? true);
-      setStatusMsg('Server reiniciado — sesión conservada.');
+      setStatusMsg('Server restarted — session preserved.');
     } else {
-      setStatusMsg(`Reinicio falló: ${r.error ?? 'unknown'}`);
+      setStatusMsg(`Restart failed: ${r.error ?? 'unknown'}`);
     }
   }, []);
 
-  // Matar el subprocess inmediatamente (Phase 5)
-  const onKill = useCallback(async () => {
-    await window.api.killServer();
-    setStatusMsg('Server matado (SIGKILL).');
+  // Reset the MCP client: disconnect + reconnect (fresh handshake), without touching the server
+  const onClientRestart = useCallback(async () => {
+    setStatusMsg('Reconnecting client…');
+    const r = await window.api.clientRestart();
+    setStatusMsg(r.ok ? 'Client reconnected — handshake complete.' : `Reconnect failed: ${r.error ?? 'unknown'}`);
   }, []);
 
-  // Pausa MITM: congelar TODO el tráfico sin matar el subprocess (Phase 6)
+  // Kill the subprocess immediately (Phase 5)
+  const onKill = useCallback(async () => {
+    await window.api.killServer();
+    setStatusMsg('Server killed (SIGKILL).');
+  }, []);
+
+  // MITM pause: freeze ALL traffic without killing the subprocess (Phase 6)
   const onPause = useCallback(async () => {
     const r = await window.api.pauseServer();
     if (r.ok) {
       setPaused(true);
-      setStatusMsg('Tráfico pausado — el server sigue vivo.');
+      setStatusMsg('Traffic paused — the server stays alive.');
     }
   }, []);
 
-  // Resume: liberar la cola FIFO (los mensajes re-entran al pipeline)
+  // Resume: release the FIFO queue (messages re-enter the pipeline)
   const onResume = useCallback(async () => {
     const r = await window.api.resumeServer();
     if (r.ok) {
       setPaused(false);
-      setStatusMsg('Tráfico reanudado — la cola fue liberada en orden.');
+      setStatusMsg('Traffic resumed — the queue was released in order.');
     }
   }, []);
 
@@ -351,23 +360,23 @@ export default function App(): React.ReactElement {
 
   // ——— Client → server interaction ———
   const doRequest = useCallback(async (method: string, params?: unknown, label?: string) => {
-    setStatusMsg(`Enviando ${label ?? method}…`);
+    setStatusMsg(`Sending ${label ?? method}…`);
     const r = await window.api.clientRequest(method, params);
     if (r.ok) {
-      setStatusMsg(`${label ?? method} OK — respuesta en el log.`);
+      setStatusMsg(`${label ?? method} OK — response in the log.`);
       setLastToolResult({
         seq: -1, ts: new Date().toISOString(), dir: 's2c', kind: 'response',
         rpcId: null, method: label ?? method, result: r.result, raw: JSON.stringify(r.result),
       });
     } else {
-      setStatusMsg(`ERROR en ${label ?? method}: ${r.error}`);
+      setStatusMsg(`ERROR in ${label ?? method}: ${r.error}`);
     }
   }, []);
 
   const onPing = useCallback(() => { void doRequest('ping', undefined, 'ping'); }, [doRequest]);
   const onListTools = useCallback(() => { void doRequest('tools/list', undefined, 'tools/list'); }, [doRequest]);
   const onCallEcho = useCallback(() => {
-    void doRequest('tools/call', { name: 'echo', arguments: { message: 'hola desde el cliente MCP real' } }, 'tools/call echo');
+    void doRequest('tools/call', { name: 'echo', arguments: { message: 'hello from the real MCP client' } }, 'tools/call echo');
   }, [doRequest]);
   const onCallLongRunning = useCallback(() => {
     void doRequest('tools/call', { name: 'longRunningOperation', arguments: { duration: 3, steps: 5 } }, 'tools/call longRunning');
@@ -377,20 +386,20 @@ export default function App(): React.ReactElement {
     try {
       const msg = JSON.parse(raw) as JsonRpcMessage;
       const r = await window.api.write(msg);
-      setStatusMsg(r.ok ? 'Raw enviado (c2s en el log).' : 'Server no vivo — no se pudo enviar.');
+      setStatusMsg(r.ok ? 'Raw sent (c2s in the log).' : 'Server not alive — could not send.');
     } catch {
-      setStatusMsg('JSON inválido — no se envió.');
+      setStatusMsg('Invalid JSON — not sent.');
     }
   }, []);
 
   const onExport = useCallback(async () => {
     const r = await window.api.exportSession();
-    setStatusMsg(r.ok ? `Exportado a ${r.filePath}` : `Export cancelado (${r.error})`);
+    setStatusMsg(r.ok ? `Exported to ${r.filePath}` : `Export canceled (${r.error})`);
   }, []);
 
   const onImport = useCallback(async () => {
     const r = await window.api.importSession();
-    setStatusMsg(r.ok ? `Importado: ${r.count} entries` : `Import cancelado (${r.error})`);
+    setStatusMsg(r.ok ? `Imported: ${r.count} entries` : `Import canceled (${r.error})`);
     if (r.ok) {
       const s = await window.api.status();
       setEntries((prev) => prev.slice(0, s.count));
@@ -425,7 +434,7 @@ export default function App(): React.ReactElement {
 
   const handleResolveHold = useCallback(async (id: string, resolution: HoldResolution) => {
     const r = await window.api.interceptResolve(id, resolution);
-    if (!r.ok) setStatusMsg('El hold ya fue resuelto o no existe.');
+    if (!r.ok) setStatusMsg('The hold was already resolved or does not exist.');
   }, []);
 
   // ——— Wizard handlers ———
@@ -441,25 +450,15 @@ export default function App(): React.ReactElement {
     if (wizardStep === 2) setWizardStep(1);
   }, [wizardStep]);
 
-  const handleChangeServer = useCallback(() => {
-    setWizardStep(1);
-    setShowWizard(true);
-  }, []);
-
-  const handleChangeClient = useCallback(() => {
-    setWizardStep(2);
-    setShowWizard(true);
-  }, []);
-
   // Don't render main UI until initialized
   if (!initialized) {
     return (
       <div className="app">
         <header className="topbar">
-          <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
+          <div className="brand"><div className="logo">⌘</div> MCP Inspector{appVersion && <span className="brand-version" title="App version">v{appVersion}</span>}</div>
         </header>
         <div className="middle" style={{ display: 'grid', placeItems: 'center' }}>
-          <span style={{ color: 'var(--text-dim)' }}>Cargando…</span>
+          <span style={{ color: 'var(--text-dim)' }}>Loading…</span>
         </div>
       </div>
     );
@@ -470,7 +469,7 @@ export default function App(): React.ReactElement {
     return (
       <div className="app">
         <header className="topbar">
-          <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
+          <div className="brand"><div className="logo">⌘</div> MCP Inspector{appVersion && <span className="brand-version" title="App version">v{appVersion}</span>}</div>
           <div className="session-info">
             <span className="pill gray">○ Wizard</span>
           </div>
@@ -498,16 +497,16 @@ export default function App(): React.ReactElement {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><div className="logo">⌘</div> MCP Inspector</div>
+        <div className="brand"><div className="logo">⌘</div> MCP Inspector{appVersion && <span className="brand-version" title="App version">v{appVersion}</span>}</div>
         <div className="session-info">
-          <span className={`pill ${running ? 'green' : 'gray'}`}>{running ? '● Capturando' : '○ Detenido'}</span>
-          {paused && <span className="pill warning" title="Tráfico congelado — el subprocess sigue vivo">⏸ Pausado</span>}
+          <span className={`pill ${running ? 'green' : 'gray'}`}>{running ? '● Capturing' : '○ Stopped'}</span>
+          {paused && <span className="pill warning" title="Traffic frozen — the subprocess stays alive">⏸ Paused</span>}
           {paused && (pausedQueue.c2s + pausedQueue.s2c) > 0 && (
-            <span className="pill warning" title="Mensajes en cola esperando el resume">{
-              `${pausedQueue.c2s + pausedQueue.s2c} en cola (→${pausedQueue.c2s} ←${pausedQueue.s2c})`
+            <span className="pill warning" title="Messages queued waiting for resume">{
+              `${pausedQueue.c2s + pausedQueue.s2c} queued (→${pausedQueue.c2s} ←${pausedQueue.s2c})`
             }</span>
           )}
-          <span className="pill">{entries.length} mensajes</span>
+          <span className="pill">{entries.length} messages</span>
           {exitInfo && <span className="pill">exit code={exitInfo.code}</span>}
         </div>
       </header>
@@ -523,7 +522,6 @@ export default function App(): React.ReactElement {
           onDelete={handleDeleteServer}
           running={running}
           onStart={onStart}
-          onStop={onStop}
           onRestart={onRestart}
           onKill={onKill}
           paused={paused}
@@ -561,16 +559,13 @@ export default function App(): React.ReactElement {
           onCallEcho={onCallEcho}
           onCallLongRunning={onCallLongRunning}
           onSendRaw={onSendRaw}
+          onClientRestart={onClientRestart}
           onExport={onExport}
           onImport={onImport}
         />
       </div>
       <footer className="status">
         <div className="status-left">{statusMsg}</div>
-        <div className="status-right">
-          <button className="btn-link" onClick={handleChangeServer} title="Cambiar MCP Server">↻ Server</button>
-          <button className="btn-link" onClick={handleChangeClient} title="Cambiar MCP Client">↻ Client</button>
-        </div>
       </footer>
     </div>
   );

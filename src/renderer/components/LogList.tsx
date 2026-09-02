@@ -12,7 +12,7 @@ type ViewMode = 'formatted' | 'raw';
 /** Pixels of tolerance to consider the user "at the bottom". */
 const STICKY_THRESHOLD = 24;
 
-/** Métodos MCP estándar para el filtro por método (Phase 5). */
+/** Standard MCP methods for the method filter (Phase 5). */
 const METHOD_FILTERS = [
   { label: 'all', value: '' },
   { label: 'initialize', value: 'initialize' },
@@ -28,7 +28,7 @@ const METHOD_FILTERS = [
   { label: 'logging/*', value: 'logging/' },
 ];
 
-/** Entradas técnicas (stderr / lifecycle / proxy) — ocultas por defecto en la vista chat. */
+/** Technical entries (stderr / lifecycle / proxy) — hidden by default in the chat view. */
 function isTechnical(e: LogEntry): boolean {
   return (
     !!e.stderr ||
@@ -39,9 +39,9 @@ function isTechnical(e: LogEntry): boolean {
 }
 
 /**
- * Agrupación estilo mensajería:
- * - 'tx': par request↔response correlacionados por rpcId (o huérfanos de un lado).
- * - 'solo': notifications y entradas técnicas — burbujas sueltas cronológicas.
+ * Messaging-style grouping:
+ * - 'tx': request↔response pairs correlated by rpcId (or orphans on one side).
+ * - 'solo': notifications and technical entries — loose chronological bubbles.
  */
 interface ChatGroup {
   key: string;
@@ -105,13 +105,13 @@ export default function LogList({ entries }: Props): React.ReactElement {
     return c;
   }, [entries]);
 
-  /** Método efectivo de un entry (responses: el request correlacionado). */
+  /** Effective method of an entry (responses: the correlated request). */
   const entryMethod = (e: LogEntry): string =>
     e.method && e.method !== '[lifecycle]' && e.method !== '[stderr]' && e.method !== '[proxy]'
       ? e.method
       : e.requestMethod ?? '';
 
-  // Filtered entries (mismos filtros que el timeline — misma data)
+  // Filtered entries (same filters as the timeline — same data)
   const filtered = useMemo(() => {
     let list = entries;
     if (!showTech) list = list.filter((e) => !isTechnical(e));
@@ -131,13 +131,13 @@ export default function LogList({ entries }: Props): React.ReactElement {
     return list;
   }, [entries, filter, methodFilter, search, showTech]);
 
-  // Número de técnicos ocultos (para el hint del empty state)
+  // Number of hidden technical entries (for the empty-state hint)
   const hiddenTechCount = useMemo(
     () => (showTech ? 0 : entries.filter((e) => isTechnical(e)).length),
     [entries, showTech],
   );
 
-  // ——— Agrupación chat: transacciones + burbujas sueltas ———
+  // ——— Chat grouping: transactions + loose bubbles ———
   const groups = useMemo(() => {
     const byId = new Map<string, ChatGroup>();
     const out: ChatGroup[] = [];
@@ -157,7 +157,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
         }
         continue;
       }
-      // response | error — completa la transacción de su id (o queda huérfana)
+      // response | error — completes the transaction with its id (or stays orphaned)
       const g = byId.get(String(e.rpcId));
       if (g) {
         g.response = e;
@@ -193,7 +193,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
     { key: 'error', label: 'Errors', count: counts.error },
   ];
 
-  // ——— Render de una burbuja (request derecha / response izq. / notif gris) ———
+  // ——— Render a bubble (request right / response left / notif gray) ———
   const renderBubble = (e: LogEntry): React.ReactElement => {
     const isOpen = expanded.has(e.seq);
     const side = e.dir === 'c2s' ? 'right' : 'left';
@@ -206,7 +206,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
         onClick={() => toggle(e.seq)}
       >
         <div className="bubble-meta">
-          <span className={`bubble-origin ${side}`} title={e.dir === 'c2s' ? 'Cliente → Server' : 'Server → Cliente'}>
+          <span className={`bubble-origin ${side}`} title={e.dir === 'c2s' ? 'Client → Server' : 'Server → Client'}>
             {e.dir === 'c2s' ? '▲' : '●'}
           </span>
           <span className="log-toggle">{isOpen ? '▾' : '▸'}</span>
@@ -217,35 +217,35 @@ export default function LogList({ entries }: Props): React.ReactElement {
             </span>
             {e.rpcId != null && <span className="id">id={String(e.rpcId)}</span>}
           </span>
-          {/* Badge de spec (Phase 5) */}
+          {/* Spec badge (Phase 5) */}
           {e.spec && !e.spec.ok && (
             <span
               className="spec-badge spec-error"
-              title={`No conforme con la spec MCP: ${e.spec.issues ?? ''}`}
+              title={`Not compliant with the MCP spec: ${e.spec.issues ?? ''}`}
             >
               ⚠ spec
             </span>
           )}
-          {/* Badges de interceptación (Phase 6/7) */}
+          {/* Interception badges (Phase 6/7) */}
           {e.held && (
-            <span className="pill warning" title={`Retenido ${e.heldMs ?? 0} ms`}>
+            <span className="pill warning" title={`Held for ${e.heldMs ?? 0} ms`}>
               ⏸
             </span>
           )}
           {e.modified && (
-            <span className="pill purple" title="Modificado por el usuario">
+            <span className="pill purple" title="Modified by the user">
               ✎
             </span>
           )}
           {e.dropped && (
-            <span className="pill danger" title="Descartado — nunca llegó a destino">
+            <span className="pill danger" title="Dropped — never reached its destination">
               ✕
             </span>
           )}
           {e.simulated === 'fault' && (
             <span
               className="pill danger"
-              title="Fault injection — error JSON-RPC inyectado por regla"
+              title="Fault injection — JSON-RPC error injected by a rule"
             >
               ⚡ fault
             </span>
@@ -253,7 +253,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
           {e.simulated === 'mock' && (
             <span
               className="pill purple"
-              title="Auto-mock — respuesta sintética, el destino real no fue golpeado"
+              title="Auto-mock — synthetic response, the real destination was never hit"
             >
               🧪 mock
             </span>
@@ -261,7 +261,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
           {e.simulated === 'throttle' && (
             <span
               className="pill warning"
-              title={`Throttling — retraso artificial de ${e.heldMs ?? 0} ms`}
+              title={`Throttling — artificial delay of ${e.heldMs ?? 0} ms`}
             >
               🕒 {e.heldMs ?? 0}ms
             </span>
@@ -270,7 +270,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
             {e.error ? `code ${e.error.code}` : status(e)}
           </span>
         </div>
-        {/* Payload plegado a 2 líneas; click expande inline */}
+        {/* Payload folded to 2 lines; click expands inline */}
         {!isOpen && <div className="bubble-snippet">{snippetOf(e)}</div>}
         {isOpen && (
           <div className="preview" onClick={(ev) => ev.stopPropagation()}>
@@ -282,7 +282,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
                     ev2.stopPropagation();
                     setViewMode('formatted');
                   }}
-                  title="Vista formateada con sintaxis coloreada"
+                  title="Formatted view with syntax coloring"
                 >
                   Formatted
                 </button>
@@ -292,7 +292,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
                     ev2.stopPropagation();
                     setViewMode('raw');
                   }}
-                  title="JSON sin formato, copiable"
+                  title="Raw JSON, copyable"
                 >
                   Raw
                 </button>
@@ -303,9 +303,9 @@ export default function LogList({ entries }: Props): React.ReactElement {
                   ev2.stopPropagation();
                   copyRaw(e);
                 }}
-                title="Copiar payload al portapapeles"
+                title="Copy payload to clipboard"
               >
-                {copied === e.seq ? '✓ Copiado' : '⧉ Copiar'}
+                {copied === e.seq ? '✓ Copied' : '⧉ Copy'}
               </button>
             </div>
             {viewMode === 'formatted' ? (
@@ -316,8 +316,8 @@ export default function LogList({ entries }: Props): React.ReactElement {
               </pre>
             )}
             {e.spec && !e.spec.ok && (
-              <div className="spec-issues danger-text" title="Detalle">
-                ⚠ Spec MCP: {e.spec.issues ?? 'no conforme'}
+              <div className="spec-issues danger-text" title="Details">
+                ⚠ MCP spec: {e.spec.issues ?? 'not compliant'}
               </div>
             )}
           </div>
@@ -326,7 +326,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
     );
   };
 
-  // ——— Render de una transacción (bloque full-width request↔response) ———
+  // ——— Render a transaction (full-width request↔response block) ———
   const renderTx = (g: ChatGroup): React.ReactElement => {
     const req = g.request;
     const resp = g.response;
@@ -339,16 +339,16 @@ export default function LogList({ entries }: Props): React.ReactElement {
             <span className="m">{method}</span>
             {id != null && <span className="id">id={String(id)}</span>}
           </span>
-          {/* Latencia correlacionada (Phase 5) */}
+          {/* Correlated latency (Phase 5) */}
           {resp?.latencyMs !== undefined && (
             <span
               className={`latency ${resp.latencyMs > 2000 ? 'slow' : ''}`}
-              title={`Latencia request→response (${resp.requestMethod ?? '?'})`}
+              title={`Request→response latency (${resp.requestMethod ?? '?'})`}
             >
               {resp.latencyMs} ms
             </span>
           )}
-          {!resp && <span className="tx-waiting">esperando respuesta…</span>}
+          {!resp && <span className="tx-waiting">waiting for response…</span>}
         </div>
         <div className="tx-msgs">
           {req && renderBubble(req)}
@@ -362,13 +362,13 @@ export default function LogList({ entries }: Props): React.ReactElement {
     <section className="panel log-panel">
       <div className="panel-header">
         <span className="icon">📜</span>
-        <span>Tráfico en vivo</span>
+        <span>Live traffic</span>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)', fontWeight: 400 }}>
-          MITM · {entries.length} mensajes
+          MITM · {entries.length} messages
         </span>
       </div>
 
-      {/* Toolbar: filters + method filter + search + toggle técnicos */}
+      {/* Toolbar: filters + method filter + search + tech toggle */}
       <div className="log-toolbar">
         <div className="log-filters">
           {filters.map((f) => (
@@ -376,7 +376,7 @@ export default function LogList({ entries }: Props): React.ReactElement {
               key={f.key}
               className={`filter-btn ${filter === f.key ? 'active' : ''}`}
               onClick={() => setFilter(f.key)}
-              title={`Mostrar ${f.label.toLowerCase()}`}
+              title={`Show ${f.label.toLowerCase()}`}
             >
               {f.label}
               {f.count > 0 && <span className="filter-count">{f.count}</span>}
@@ -385,9 +385,9 @@ export default function LogList({ entries }: Props): React.ReactElement {
           <button
             className={`filter-btn ${showTech ? 'active' : ''}`}
             onClick={() => setShowTech((v) => !v)}
-            title="Mostrar/ocultar mensajes técnicos (stderr, lifecycle, proxy)"
+            title="Show/hide technical messages (stderr, lifecycle, proxy)"
           >
-            🔧 técnicos
+            🔧 tech
             {hiddenTechCount > 0 && <span className="filter-count">{hiddenTechCount}</span>}
           </button>
         </div>
@@ -395,56 +395,56 @@ export default function LogList({ entries }: Props): React.ReactElement {
           className="log-method-filter"
           value={methodFilter}
           onChange={(e) => setMethodFilter(e.target.value)}
-          title="Filtrar por método MCP"
+          title="Filter by MCP method"
         >
           {METHOD_FILTERS.map((m) => (
             <option key={m.value || 'all'} value={m.value}>
-              {m.label === 'all' ? 'método: todos' : m.label}
+              {m.label === 'all' ? 'method: all' : m.label}
             </option>
           ))}
         </select>
         <input
           className="log-search"
-          placeholder="Buscar método, id, payload…"
+          placeholder="Search method, id, payload…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
-      {/* Contenedor scroll: el botón Último es sticky DENTRO de este scroll,
-          no un hermano del contenido — así no rompe el layout flex del chat. */}
+      {/* Scroll container: the Latest button is sticky INSIDE this scroll,
+          not a sibling of the content — so it doesn't break the chat's flex layout. */}
       <div className="log-list chat" ref={listRef} onScroll={handleScroll}>
         <div className="chat-content">
           {filtered.length === 0 && entries.length === 0 && (
           <div className="empty-state">
             <span className="empty-state-icon">📜</span>
             <span className="empty-state-text">
-              Esperando tráfico… Inicia el server para ver mensajes
+              Waiting for traffic… Start the server to see messages
             </span>
           </div>
         )}
         {filtered.length === 0 && entries.length > 0 && (
           <div className="empty-state">
             <span className="empty-state-icon">🔍</span>
-            <span className="empty-state-text">Sin resultados para el filtro/búsqueda actual</span>
+            <span className="empty-state-text">No results for the current filter/search</span>
             {hiddenTechCount > 0 && (
               <span className="empty-state-text">
-                {hiddenTechCount} mensajes técnicos ocultos — activa 🔧 técnicos
+                {hiddenTechCount} technical messages hidden — enable 🔧 tech
               </span>
             )}
           </div>
         )}
         {groups.map((g) => (g.type === 'solo' ? renderBubble(g.solo!) : renderTx(g)))}
         </div>
-        {/* Botón flotante sticky dentro del scroll — no rompe el layout flex del chat */}
+        {/* Sticky floating button inside the scroll — doesn't break the chat's flex layout */}
         {showJumpBtn && (
           <div className="jump-latest">
             <button
               className="jump-latest-btn"
               onClick={jumpToBottom}
-              title="Volver al último mensaje"
+              title="Back to the latest message"
             >
-              ⤓ Último
+              ⤓ Latest
             </button>
           </div>
         )}
@@ -460,20 +460,20 @@ function status(e: LogEntry): string {
   return '';
 }
 
-/** Payload resumido de una burbuja (2 líneas plegadas). */
+/** Folded payload summary of a bubble (2 collapsed lines). */
 function snippetOf(e: LogEntry): string {
   let s: string;
   if (e.stderr) s = e.stderr;
   else if (e.method === '[lifecycle]' || e.method === '[proxy]') s = e.raw;
   else if (e.kind === 'request' || e.kind === 'notification')
-    s = e.params !== undefined ? JSON.stringify(e.params) : '(sin params)';
+    s = e.params !== undefined ? JSON.stringify(e.params) : '(no params)';
   else if (e.error) s = JSON.stringify(e.error);
-  else s = e.result !== undefined ? JSON.stringify(e.result) : '(sin result)';
+  else s = e.result !== undefined ? JSON.stringify(e.result) : '(no result)';
   if (s.length > 600) s = s.slice(0, 600) + '…';
   return s;
 }
 
-/** Payload raw sin formato (para el tab Raw). */
+/** Raw unformatted payload (for the Raw tab). */
 function rawOf(e: LogEntry): string {
   return e.raw;
 }

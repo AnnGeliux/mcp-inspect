@@ -1,9 +1,9 @@
 /**
- * Tipos compartidos entre main, preload y renderer.
+ * Types shared between main, preload and renderer.
  * MCP JSON-RPC 2.0 message types.
  */
 
-/** Cualquier mensaje JSON-RPC 2.0 válido en MCP. */
+/** Any valid JSON-RPC 2.0 message in MCP. */
 export type JsonRpcId = string | number | null;
 
 export interface JsonRpcRequest {
@@ -34,117 +34,117 @@ export interface JsonRpcError {
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
-/** Dirección del mensaje en el log. */
+/** Message direction in the log. */
 export type Direction = 'c2s' | 's2c';
 
-/** Una entrada en el log de tráfico. */
+/** An entry in the traffic log. */
 export interface LogEntry {
-  /** ID autoincrementable local. */
+  /** Local auto-incrementing ID. */
   seq: number;
-  /** Timestamp ISO 8601. */
+  /** ISO 8601 timestamp. */
   ts: string;
-  /** Dirección: cliente→server o server→cliente. */
+  /** Direction: client→server or server→client. */
   dir: Direction;
-  /** Tipo detectado por inspección del JSON. */
+  /** Type detected by inspecting the JSON. */
   kind: 'request' | 'notification' | 'response' | 'error';
-  /** ID JSON-RPC (null para notifications). */
+  /** JSON-RPC ID (null for notifications). */
   rpcId: JsonRpcId;
-  /** Método (solo para request/notification). */
+  /** Method (requests/notifications only). */
   method?: string;
-  /** Resultado (response). */
+  /** Result (responses). */
   result?: unknown;
-  /** Error (response con error). */
+  /** Error (responses with an error). */
   error?: JsonRpcError;
-  /** Params (request/notification). */
+  /** Params (requests/notifications). */
   params?: unknown;
-  /** Bytes raw que produjo este mensaje (NDJSON line). */
+  /** Raw bytes this message produced (NDJSON line). */
   raw: string;
-  /** Bytes capturados en stderr (separado del canal MCP). */
+  /** Bytes captured on stderr (separate from the MCP channel). */
   stderr?: string;
-  /** Latencia request→response en ms (solo responses correlacionadas por rpcId). */
+  /** request→response latency in ms (only for responses correlated by rpcId). */
   latencyMs?: number;
-  /** Método del request originante (solo responses correlacionadas — las respuestas JSON-RPC no llevan method). */
+  /** Method of the originating request (only for correlated responses — JSON-RPC responses carry no method). */
   requestMethod?: string;
-  /** Resultado de la validación contra los schemas oficiales del protocolo MCP. */
+  /** Result of validation against the official MCP protocol schemas. */
   spec?: SpecCheck;
-  /** true si el mensaje fue retenido por un breakpoint antes de entregarse. */
+  /** true if the message was held by a breakpoint before delivery. */
   held?: boolean;
-  /** ms que el mensaje estuvo retenido por un breakpoint. */
+  /** ms the message was held by a breakpoint. */
   heldMs?: number;
-  /** true si el mensaje fue modificado por el usuario antes de entregarse. */
+  /** true if the message was modified by the user before delivery. */
   modified?: boolean;
-  /** true si el mensaje fue descartado por el usuario (nunca llegó a su destino). */
+  /** true if the message was discarded by the user (never reached its destination). */
   dropped?: boolean;
-  /** Simulación aplicada por una regla (fault injection / auto-mock / throttle). */
+  /** Simulation applied by a rule (fault injection / auto-mock / throttle). */
   simulated?: 'fault' | 'mock' | 'throttle';
 }
 
-/** Resultado compacto de validación contra la spec MCP (via schemas zod del SDK). */
+/** Compact validation result against the MCP spec (via the SDK's zod schemas). */
 export interface SpecCheck {
   ok: boolean;
-  /** Primeros issues formateados (solo si ok=false). */
+  /** First issues, formatted (only when ok=false). */
   issues?: string;
 }
 
-/** Config de spawn que el usuario llena en la UI. */
+/** Spawn config the user fills in the UI. */
 export interface ServerConfig {
-  /** Comando a ejecutar (ej. "npx"). */
+  /** Command to run (e.g. "npx"). */
   command: string;
-  /** Args (ej. ["-y", "@modelcontextprotocol/everything-server"]). */
+  /** Args (e.g. ["-y", "@modelcontextprotocol/everything-server"]). */
   args: string[];
-  /** Env vars extra. */
+  /** Extra env vars. */
   env?: Record<string, string>;
   /**
-   * Si true (default), el cliente MCP real (SDK) se conecta al proxy tras
-   * el spawn y ejecuta el handshake initialize → initialized.
-   * Los presets de test (echo) usan false: no son servers MCP completos.
+   * If true (default), the real MCP client (SDK) connects to the proxy
+   * after spawn and runs the initialize → initialized handshake.
+   * Test presets (echo) use false: they are not full MCP servers.
    */
   connectClient?: boolean;
 }
 
-/** Config de un cliente MCP guardado. */
+/** Config of a saved MCP client. */
 export interface ClientConfig {
-  /** Tipo de cliente: 'sdk' = SDK oficial, 'inspector' = inspector official CLI. */
+  /** Client type: 'sdk' = official SDK, 'inspector' = inspector official CLI. */
   type: 'sdk' | 'inspector';
-  /** Nombre descriptivo. */
+  /** Descriptive name. */
   name: string;
-  /** Comando a ejecutar (ej. "npx"). */
+  /** Command to run (e.g. "npx"). */
   command: string;
-  /** Args (ej. ["@modelcontextprotocol/inspector"]). */
+  /** Args (e.g. ["@modelcontextprotocol/inspector"]). */
   args: string[];
-  /** Env vars extra. */
+  /** Extra env vars. */
   env?: Record<string, string>;
 }
 
-/** Un MCP server guardado (persistible). */
+/** A saved MCP server (persistable). */
 export interface SavedServer {
-  /** ID único (uuid o timestamp). */
+  /** Unique ID (uuid or timestamp). */
   id: string;
-  /** Nombre descriptivo. */
+  /** Descriptive name. */
   name: string;
-  /** Descripción corta opcional para mostrar en la card. */
+  /** Optional short description shown on the card. */
   description?: string;
-  /** Config de spawn. */
+  /** Spawn config. */
   config: ServerConfig;
-  /** Si true, es un preset que no se puede borrar. */
+  /** If true, it's a preset that cannot be deleted. */
   preset?: boolean;
 }
 
-/** Un MCP client guardado (persistible). */
+/** A saved MCP client (persistable). */
 export interface SavedClient {
-  /** ID único (uuid o timestamp). */
+  /** Unique ID (uuid or timestamp). */
   id: string;
-  /** Nombre descriptivo. */
+  /** Descriptive name. */
   name: string;
-  /** Descripción corta opcional para mostrar en la card. */
+  /** Optional short description shown on the card. */
   description?: string;
-  /** Config del cliente. */
+  /** Client config. */
   config: ClientConfig;
-  /** Si true, es un preset que no se puede borrar. */
+  /** If true, it's a preset that cannot be deleted. */
   preset?: boolean;
 }
 
-/** Estado de sesión exportable. */
+/** Exportable session state. */
 export interface SessionExport {
   version: 1;
   exportedAt: string;
@@ -153,13 +153,13 @@ export interface SessionExport {
 }
 
 /**
- * Simulación asociada a una regla (Phase 7).
- * - 'hold': breakpoint clásico — retiene y espera decisión del usuario.
- * - 'throttle': entrega el original tras `throttleMs` de retraso artificial.
- * - 'fault': descarta el mensaje y entrega una respuesta de error JSON-RPC
- *   al cliente (generada con el id del request original).
- * - 'mock': descarta el mensaje y entrega `mockResult`/`mockError` al
- *   cliente sin golpear el destino real.
+ * Simulation associated with a rule (Phase 7).
+ * - 'hold': classic breakpoint — holds and waits for the user's decision.
+ * - 'throttle': delivers the original after `throttleMs` of artificial delay.
+ * - 'fault': discards the message and delivers a JSON-RPC error response
+ *   to the client (generated with the original request's id).
+ * - 'mock': discards the message and delivers `mockResult`/`mockError` to
+ *   the client without hitting the real destination.
  */
 export type SimulationConfig =
   | { type: 'hold' }
@@ -167,37 +167,37 @@ export type SimulationConfig =
   | { type: 'fault'; faultCode?: number; faultMessage?: string }
   | { type: 'mock'; mockResult?: unknown; mockError?: JsonRpcError };
 
-/** Una regla de interceptación activa en el proxy. */
+/** An active interception rule in the proxy. */
 export interface InterceptRule {
-  /** ID único. */
+  /** Unique ID. */
   id: string;
-  /** Dirección que pausa: c2s (breakpoint de petición) o s2c (breakpoint de respuesta). */
+  /** Direction it pauses: c2s (request breakpoint) or s2c (response breakpoint). */
   dir: 'c2s' | 's2c';
-  /** Método al que aplica ('' = todos). */
+  /** Method it applies to ('' = all). */
   method: string;
-  /** true = regla activa. */
+  /** true = rule active. */
   enabled: boolean;
-  /** Simulación a aplicar al coincidir (default 'hold' — comportamiento Phase 6). */
+  /** Simulation to apply on match (default 'hold' — Phase 6 behavior). */
   simulation?: SimulationConfig;
 }
 
-/** Un mensaje retenido por un breakpoint, esperando decisión del usuario. */
+/** A message held by a breakpoint, awaiting the user's decision. */
 export interface HeldMessage {
-  /** ID del hold (uuid). */
+  /** Hold ID (uuid). */
   id: string;
-  /** Dirección del mensaje. */
+  /** Message direction. */
   dir: 'c2s' | 's2c';
-  /** Mensaje JSON-RPC original tal como llegó. */
+  /** Original JSON-RPC message exactly as it arrived. */
   msg: JsonRpcMessage;
-  /** Regla que lo capturó (null = intercept-all). */
+  /** Rule that captured it (null = intercept-all). */
   ruleId: string | null;
-  /** Timestamp ISO de cuándo fue retenido. */
+  /** ISO timestamp of when it was held. */
   heldAt: string;
-  /** Resolución ya decidida por el usuario pero pendiente de entrega (en cola tras otro hold). */
+  /** Resolution already decided by the user but pending delivery (queued behind another hold). */
   pendingResolution?: HoldResolution;
 }
 
-/** Acción de resolución de un hold. */
+/** Resolution action for a hold. */
 export type HoldResolution =
   | { action: 'send' }
   | { action: 'send-modified'; msg: JsonRpcMessage }

@@ -14,7 +14,7 @@ interface Props {
   onResolve: (id: string, resolution: { action: 'send' } | { action: 'send-modified'; msg: JsonRpcMessage } | { action: 'drop' } | { action: 'respond'; msg: JsonRpcMessage }) => void;
 }
 
-/** Sugerencias de método para el dropdown de reglas. */
+/** Method suggestions for the rules dropdown. */
 const METHOD_SUGGESTIONS = [
   '',
   'initialize',
@@ -32,7 +32,7 @@ const METHOD_SUGGESTIONS = [
   'elicitation/create',
 ];
 
-/** Errores JSON-RPC estándar para fault injection. */
+/** Standard JSON-RPC errors for fault injection. */
 const FAULT_PRESETS = [
   { code: -32601, label: '-32601 Method not found' },
   { code: -32602, label: '-32602 Invalid params' },
@@ -44,24 +44,24 @@ const FAULT_PRESETS = [
 
 type SimType = 'hold' | 'fault' | 'mock' | 'throttle';
 
-/** Pill corta para el tipo de simulación de una regla. */
+/** Short pill for a rule's simulation type. */
 function simBadge(r: InterceptRule): React.ReactElement | null {
   const s = r.simulation;
   if (!s) return null;
   if (s.type === 'fault') return <span className="pill danger" title={`Fault injection: error ${'faultCode' in s ? s.faultCode ?? -32603 : -32603}`}>⚡ fault</span>;
-  if (s.type === 'mock') return <span className="pill purple" title="Auto-mock: respuesta predeterminada, no golpea el destino">🧪 mock</span>;
+  if (s.type === 'mock') return <span className="pill purple" title="Auto-mock: canned response, does not hit the destination">🧪 mock</span>;
   if (s.type === 'throttle') return <span className="pill warning" title={`Throttling: +${'throttleMs' in s ? s.throttleMs : 0} ms`}>🕒 {('throttleMs' in s ? s.throttleMs : 0)}ms</span>;
   return null;
 }
 
 /**
- * InterceptBar — barra de interceptación MITM (Phase 6+7).
+ * InterceptBar — MITM interception bar (Phase 6+7).
  *
- * - Toggles intercept-all por dirección (c2s = pausar peticiones, s2c = pausar respuestas).
- * - Reglas por método con simulación opcional (Phase 7):
- *     hold (breakpoint clásico) · fault (error JSON-RPC) · mock (respuesta
- *     predeterminada) · throttle (retraso artificial).
- * - Holds activos: editor inline JSON + Enviar / Enviar editado / Drop / Responder.
+ * - Intercept-all toggles per direction (c2s = hold requests, s2c = hold responses).
+ * - Per-method rules with optional simulation (Phase 7):
+ *     hold (classic breakpoint) · fault (JSON-RPC error) · mock (canned
+ *     response) · throttle (artificial delay).
+ * - Active holds: inline JSON editor + Send / Send edited / Drop / Respond.
  */
 export default function InterceptBar(props: Props): React.ReactElement {
   const {
@@ -136,51 +136,51 @@ export default function InterceptBar(props: Props): React.ReactElement {
     <section className={`intercept-bar ${active ? 'active' : ''}`}>
       <div className="intercept-header">
         <span className="icon">⏸</span>
-        <span className="intercept-title">Interceptación</span>
-        <label className="intercept-toggle" title="Retener TODAS las peticiones cliente→server (breakpoint de petición)">
+        <span className="intercept-title">Interception</span>
+        <label className="intercept-toggle" title="Hold ALL client→server requests (request breakpoint)">
           <input type="checkbox" checked={interceptAllC2s} onChange={(e) => onSetInterceptAll('c2s', e.target.checked)} />
-          <span>Todas las peticiones (→)</span>
+          <span>All requests (→)</span>
         </label>
-        <label className="intercept-toggle" title="Retener TODAS las respuestas server→cliente (breakpoint de respuesta)">
+        <label className="intercept-toggle" title="Hold ALL server→client responses (response breakpoint)">
           <input type="checkbox" checked={interceptAllS2c} onChange={(e) => onSetInterceptAll('s2c', e.target.checked)} />
-          <span>Todas las respuestas (←)</span>
+          <span>All responses (←)</span>
         </label>
         {held.length > 0 && (
-          <span className="intercept-held-count pill warning" title="Mensajes retenidos esperando decisión">
-            ⏸ {held.length} retenido{held.length > 1 ? 's' : ''}
+          <span className="intercept-held-count pill warning" title="Held messages awaiting a decision">
+            ⏸ {held.length} held
           </span>
         )}
         <button className="btn-link" onClick={() => setShowRules(!showRules)}>
-          {showRules ? `▾ Reglas (${rules.length})` : `▸ Reglas (${rules.length})`}
+          {showRules ? `▾ Rules (${rules.length})` : `▸ Rules (${rules.length})`}
         </button>
-        <button className="btn-link danger-text" onClick={onClearAll} title="Quitar reglas y liberar holds (enviando originales)">
-          ✕ Limpiar
+        <button className="btn-link danger-text" onClick={onClearAll} title="Remove rules and release holds (sending originals)">
+          ✕ Clear
         </button>
       </div>
 
       {showRules && (
         <div className="intercept-rules">
           <div className="intercept-rule-new">
-            <select className="cmd-input" value={newRuleDir} onChange={(e) => setNewRuleDir(e.target.value as 'c2s' | 's2c')} title="Dirección de la regla">
-              <option value="c2s">→ peticiones (c2s)</option>
-              <option value="s2c">← respuestas (s2c)</option>
+            <select className="cmd-input" value={newRuleDir} onChange={(e) => setNewRuleDir(e.target.value as 'c2s' | 's2c')} title="Rule direction">
+              <option value="c2s">→ requests (c2s)</option>
+              <option value="s2c">← responses (s2c)</option>
             </select>
-            <select className="cmd-input" value={newRuleMethod} onChange={(e) => setNewRuleMethod(e.target.value)} title="Método al que aplica la regla (vacío = todos)">
+            <select className="cmd-input" value={newRuleMethod} onChange={(e) => setNewRuleMethod(e.target.value)} title="Method the rule applies to (empty = all)">
               {METHOD_SUGGESTIONS.map((m) => (
                 <option key={m || 'all'} value={m}>
-                  {m === '' ? 'todos los métodos' : m}
+                  {m === '' ? 'all methods' : m}
                 </option>
               ))}
             </select>
-            <select className="cmd-input sim-type" value={newRuleSim} onChange={(e) => setNewRuleSim(e.target.value as SimType)} title="Acción al coincidir la regla">
+            <select className="cmd-input sim-type" value={newRuleSim} onChange={(e) => setNewRuleSim(e.target.value as SimType)} title="Action to take when the rule matches">
               <option value="hold">⏸ breakpoint</option>
               <option value="fault">⚡ fault (error)</option>
-              <option value="mock">🧪 mock (respuesta fija)</option>
-              <option value="throttle">🕒 throttle (retraso)</option>
+              <option value="mock">🧪 mock (fixed response)</option>
+              <option value="throttle">🕒 throttle (delay)</option>
             </select>
             {newRuleSim === 'fault' && (
               <>
-                <select className="cmd-input sim-code" value={faultCode} onChange={(e) => setFaultCode(Number(e.target.value))} title="Código de error JSON-RPC">
+                <select className="cmd-input sim-code" value={faultCode} onChange={(e) => setFaultCode(Number(e.target.value))} title="JSON-RPC error code">
                   {FAULT_PRESETS.map((f) => (
                     <option key={f.code} value={f.code}>{f.label}</option>
                   ))}
@@ -189,8 +189,8 @@ export default function InterceptBar(props: Props): React.ReactElement {
                   className="cmd-input sim-msg"
                   value={faultMessage}
                   onChange={(e) => setFaultMessage(e.target.value)}
-                  placeholder="mensaje (opcional)"
-                  title="Mensaje del error inyectado"
+                  placeholder="message (optional)"
+                  title="Message of the injected error"
                 />
               </>
             )}
@@ -199,8 +199,8 @@ export default function InterceptBar(props: Props): React.ReactElement {
                 className={`cmd-input sim-mock ${mockResultValid ? '' : 'invalid'}`}
                 value={mockResult}
                 onChange={(e) => setMockResult(e.target.value)}
-                placeholder='JSON del "result" a entregar'
-                title='Contenido JSON que se entregará como result al cliente'
+                placeholder='JSON of the "result" to deliver'
+                title='JSON content that will be delivered to the client as the result'
               />
             )}
             {newRuleSim === 'throttle' && (
@@ -210,20 +210,20 @@ export default function InterceptBar(props: Props): React.ReactElement {
                 min={0}
                 value={throttleMs}
                 onChange={(e) => setThrottleMs(Number(e.target.value))}
-                title="Retraso artificial en ms"
+                title="Artificial delay in ms"
               />
             )}
             <button
               className="btn small"
               onClick={addRule}
               disabled={newRuleSim === 'mock' && !mockResultValid}
-              title="Añadir la regla"
+              title="Add the rule"
             >
-              + Añadir
+              + Add
             </button>
           </div>
           {rules.length === 0 ? (
-            <div className="intercept-rules-empty">Sin reglas — los mensajes fluyen sin pausa.</div>
+            <div className="intercept-rules-empty">No rules — messages flow without pausing.</div>
           ) : (
             <div className="intercept-rules-list">
               {rules.map((r) => (
@@ -232,9 +232,9 @@ export default function InterceptBar(props: Props): React.ReactElement {
                     <input type="checkbox" checked={r.enabled} onChange={(e) => onToggleRule(r.id, e.target.checked)} />
                   </label>
                   <span className={`dir ${r.dir === 'c2s' ? 'c2s' : 's2c'}`}>{r.dir === 'c2s' ? '→' : '←'}</span>
-                  <span className="method mono">{r.method === '' ? '(todos)' : r.method}</span>
+                  <span className="method mono">{r.method === '' ? '(all)' : r.method}</span>
                   {simBadge(r)}
-                  <button className="card-action-btn" onClick={() => onRemoveRule(r.id)} title="Eliminar regla">
+                  <button className="card-action-btn" onClick={() => onRemoveRule(r.id)} title="Delete rule">
                     ✕
                   </button>
                 </div>
@@ -251,9 +251,9 @@ export default function InterceptBar(props: Props): React.ReactElement {
           <div key={h.id} className="intercept-hold">
             <div className="intercept-hold-header">
               <span className={`dir ${h.dir === 'c2s' ? 'c2s' : 's2c'}`}>
-                {h.dir === 'c2s' ? '→ petición retenida' : '← respuesta retenida'}
+                {h.dir === 'c2s' ? '→ held request' : '← held response'}
               </span>
-              <span className="method mono">{'method' in h.msg && h.msg.method ? h.msg.method : '(respuesta)'}</span>
+              <span className="method mono">{'method' in h.msg && h.msg.method ? h.msg.method : '(response)'}</span>
               {h.ruleId === '__all__' && <span className="pill gray">intercept-all</span>}
             </div>
             <textarea
@@ -262,22 +262,22 @@ export default function InterceptBar(props: Props): React.ReactElement {
               onChange={(e) => setDraft(h.id, e.target.value)}
               spellCheck={false}
               rows={Math.min(14, draft.split('\n').length)}
-              title="Edita el JSON y usa Enviar editado / Responder"
+              title="Edit the JSON and use Send edited / Respond"
             />
-            {!valid && <div className="intercept-hold-invalid danger-text">JSON inválido — corrige para habilitar las acciones de edición</div>}
+            {!valid && <div className="intercept-hold-invalid danger-text">Invalid JSON — fix it to enable the editing actions</div>}
             <div className="intercept-hold-actions">
-              <button className="btn small" onClick={() => sendOriginal(h.id)} title="Entregar el mensaje original sin cambios">
-                ▶ Enviar
+              <button className="btn small" onClick={() => sendOriginal(h.id)} title="Deliver the original message unchanged">
+                ▶ Send
               </button>
-              <button className="btn small primary" onClick={() => sendModified(h.id)} disabled={!valid} title="Entregar la versión editada">
-                ✎ Enviar editado
+              <button className="btn small primary" onClick={() => sendModified(h.id)} disabled={!valid} title="Deliver the edited version">
+                ✎ Send edited
               </button>
-              <button className="btn small danger" onClick={() => dropHold(h.id)} title="Descartar — nunca llega a su destino">
+              <button className="btn small danger" onClick={() => dropHold(h.id)} title="Drop — never reaches its destination">
                 ✕ Drop
               </button>
               {h.dir === 's2c' && (
-                <button className="btn small" onClick={() => respondHold(h.id)} disabled={!valid} title="Descartar el original y entregar esta respuesta sintética al cliente">
-                  ⟲ Responder
+                <button className="btn small" onClick={() => respondHold(h.id)} disabled={!valid} title="Discard the original and deliver this synthetic response to the client">
+                  ⟲ Respond
                 </button>
               )}
             </div>

@@ -77,7 +77,7 @@ export default function ClientCard({
         <div className="card-actions">
           <button
             className="card-action-btn"
-            title="Editar"
+            title="Edit"
             onClick={(e) => { e.stopPropagation(); onEdit(); }}
           >
             ✎
@@ -85,10 +85,10 @@ export default function ClientCard({
           {!isPreset && (
             <button
               className="card-action-btn danger"
-              title="Eliminar"
+              title="Delete"
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`¿Eliminar el client "${client.name}"?`)) onDelete();
+                if (confirm(`Delete client "${client.name}"?`)) onDelete();
               }}
             >
               🗑

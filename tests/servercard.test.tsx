@@ -139,7 +139,7 @@ test('ServerCard: clicking edit button calls onEdit', () => {
   const { container, cleanup } = render(
     React.createElement(ServerCard, { server: customServer, selected: false, running: false, onSelect: () => {}, onEdit: () => { called = true; }, onDelete: () => {} }),
   );
-  const editBtn = container.querySelector('.card-action-btn[title="Editar"]') as HTMLElement;
+  const editBtn = container.querySelector('.card-action-btn[title="Edit"]') as HTMLElement;
   assert.ok(editBtn, 'should have an edit button');
   click(editBtn);
   assert.ok(called, 'onEdit should be called when edit button is clicked');
@@ -163,7 +163,7 @@ test('ServerCard: shows edit button for presets too', () => {
   const { container, cleanup } = render(
     React.createElement(ServerCard, { server: presetServer, selected: false, running: false, onSelect: () => {}, onEdit: () => {}, onDelete: () => {} }),
   );
-  const editBtn = container.querySelector('.card-action-btn[title="Editar"]') as HTMLElement;
+  const editBtn = container.querySelector('.card-action-btn[title="Edit"]') as HTMLElement;
   assert.ok(editBtn, 'presets should still have an edit button');
   cleanup();
 });

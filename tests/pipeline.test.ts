@@ -1,5 +1,5 @@
 /**
- * Tests del MITM Pipeline (Phase 6).
+ * MITM Pipeline tests (Phase 6).
  *
  * Run with: node --test --import tsx tests/pipeline.test.ts
  */
@@ -24,7 +24,7 @@ const PING: JsonRpcMessage = { jsonrpc: '2.0', id: 2, method: 'ping' };
 
 const PING_RESP: JsonRpcMessage = { jsonrpc: '2.0', id: 2, result: {} };
 
-// ——— Sin reglas: flujo inmediato ——————————————————————————
+// ——— No rules: immediate flow ——————————————————————————————
 
 test('pipeline: sin reglas, el mensaje fluye tal cual (inmediato)', async () => {
   const p = new MITMPipeline();
@@ -41,20 +41,20 @@ test('pipeline: process resuelve inmediatamente sin reglas (no deja promesas col
   assert.equal(r.msg, PING_RESP);
 });
 
-// ——— Reglas ———————————————————————————————————————————————————
+// ——— Rules ————————————————————————————————————————————————————
 
 test('pipeline: addRule + coincidencia por método retiene el mensaje', async () => {
   const p = new MITMPipeline();
   p.addRule('c2s', 'tools/call');
 
   const promise = p.process('c2s', { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo' } });
-  // Aún no resuelto: el hold está registrado
+  // Not yet resolved: the hold is registered
   assert.equal(p.hasHeld, true);
   const held = p.listHeld();
   assert.equal(held.length, 1);
   assert.equal(held[0]!.dir, 'c2s');
 
-  // Resolver con send → entrega original
+  // Resolve with send → delivers the original
   const ok = p.resolveHold(held[0]!.id, { action: 'send' });
   assert.equal(ok, true);
   const r = await promise;
@@ -67,7 +67,7 @@ test('pipeline: regla por método no retiene otros métodos', async () => {
   const p = new MITMPipeline();
   p.addRule('c2s', 'tools/call');
   const r = await p.process('c2s', PING);
-  assert.equal(r.held, false, 'ping no debe ser retenido por regla tools/call');
+  assert.equal(r.held, false, 'ping must not be held by a tools/call rule');
 });
 
 test('pipeline: regla deshabilitada no retiene', async () => {
@@ -95,12 +95,12 @@ test('pipeline: intercept-all retiene todo en esa dirección', async () => {
   p.resolveHold(held[0]!.id, { action: 'send' });
   const r = await promise;
   assert.equal(r.held, true);
-  // intercept-all solo aplica a s2c: c2s sigue fluyendo
+  // intercept-all only applies to s2c: c2s keeps flowing
   const r2 = await p.process('c2s', PING);
   assert.equal(r2.held, false);
 });
 
-// ——— Resoluciones ————————————————————————————————————————
+// ——— Resolutions ——————————————————————————————————————————
 
 test('pipeline: send-modified entrega el mensaje editado', async () => {
   const p = new MITMPipeline();
@@ -153,7 +153,7 @@ test('pipeline: resolveHold con id desconocido devuelve false', () => {
   assert.equal(p.resolveHold('nope', { action: 'send' }), false);
 });
 
-// ——— FIFO: orden nunca se reordena ————————————————————————
+// ——— FIFO: order is never reordered ———————————————————————
 
 test('pipeline: resolver el segundo hold primero NO lo entrega antes que el primero', async () => {
   const p = new MITMPipeline();
@@ -166,16 +166,16 @@ test('pipeline: resolver el segundo hold primero NO lo entrega antes que el prim
 
   const [h1, h2] = p.listHeld();
 
-  // Resolver el SEGUNDO primero
+  // Resolve the SECOND one first
   p.resolveHold(h2!.id, { action: 'send' });
   await sleep(10);
-  // p2 NO debe estar resuelto todavía (está detrás de h1)
+  // p2 must NOT be resolved yet (it's behind h1)
   let resolved2 = false;
   p2.then(() => { resolved2 = true; });
   await sleep(10);
-  assert.equal(resolved2, false, 'p2 no debe entregarse antes que p1 (FIFO)');
+  assert.equal(resolved2, false, 'p2 must not be delivered before p1 (FIFO)');
 
-  // Ahora resolver el primero → cascada libera el segundo
+  // Now resolve the first → the cascade releases the second
   p.resolveHold(h1!.id, { action: 'send' });
   const r1 = await p1;
   const r2 = await p2;
@@ -193,27 +193,27 @@ test('pipeline: cascada con decisiones mixtas (drop en cola) se aplica en orden'
   await sleep(0);
   const [h1, h2] = p.listHeld();
 
-  // El usuario decide drop para el 2do y send para el 1ro
+  // The user decides drop for the 2nd and send for the 1st
   p.resolveHold(h2!.id, { action: 'drop' });
   p.resolveHold(h1!.id, { action: 'send' });
 
   const r1 = await p1;
   const r2 = await p2;
-  assert.deepEqual((r1.msg as { id: number }).id, 20, 'primero entregado');
-  assert.equal(r2.msg, null, 'segundo dropeado');
+  assert.deepEqual((r1.msg as { id: number }).id, 20, 'first one delivered');
+  assert.equal(r2.msg, null, 'second one dropped');
 });
 
-// ——— Correlación id→method (latencia) ————————————————————
+// ——— id→method correlation (latency) ——————————————————————
 
 test('pipeline: correlación de respuesta por id devuelve método y latencia', async () => {
   const p = new MITMPipeline();
   const start = Date.now();
-  await p.process('c2s', PING); // observa id=2 → ping
+  await p.process('c2s', PING); // observes id=2 → ping
   await sleep(30);
   const corr = p.correlateResponse('s2c', PING_RESP);
-  assert.ok(corr, 'debe correlacionar la respuesta id=2 con ping');
+  assert.ok(corr, 'should correlate the id=2 response with ping');
   assert.equal(corr!.requestMethod, 'ping');
-  assert.ok(corr!.latencyMs >= 25, `latencia ≥ 25ms (got ${corr!.latencyMs})`);
+  assert.ok(corr!.latencyMs >= 25, `latency ≥ 25ms (got ${corr!.latencyMs})`);
   assert.ok(Date.now() - start >= 25);
 });
 
@@ -234,13 +234,13 @@ test('pipeline: respuesta sin id correlacionado → null', () => {
 
 test('pipeline: reglas s2c por método usan la correlación (responses no llevan method)', async () => {
   const p = new MITMPipeline();
-  // Regla para respuestas de ping
+  // Rule for ping responses
   p.addRule('s2c', 'ping');
-  // Request c2s ping observado
+  // c2s ping request observed
   await p.process('c2s', PING);
-  // La respuesta (sin method) debe ser retenida por la regla 'ping'
+  // The response (no method) must be held by the 'ping' rule
   const promise = p.process('s2c', PING_RESP);
-  assert.equal(p.hasHeld, true, 'la respuesta de ping debe ser retenida');
+  assert.equal(p.hasHeld, true, 'the ping response must be held');
   const held = p.listHeld();
   p.resolveHold(held[0]!.id, { action: 'send' });
   await promise;
@@ -275,7 +275,7 @@ test('pipeline: clearCorrelation limpia los mapas de correlación', () => {
   assert.equal(corr, null);
 });
 
-// ——— Eventos ————————————————————————————————————————————————
+// ——— Events ————————————————————————————————————————————————————
 
 test('pipeline: emite held/released/rulesChanged', async () => {
   const p = new MITMPipeline();
@@ -288,18 +288,18 @@ test('pipeline: emite held/released/rulesChanged', async () => {
 
   p.addRule('c2s', 'ping'); // rulesChanged #1
   const promise = p.process('c2s', PING); // held #1
-  await sleep(0); // held se emite sincrónicamente en process(), pero esperamos el tick
+  await sleep(0); // held is emitted synchronously in process(), but we wait a tick
   const [held] = p.listHeld();
   p.resolveHold(held!.id, { action: 'send' }); // released #1
   await promise;
 
   assert.equal(heldCount, 1);
   assert.equal(releasedCount, 1);
-  // addRule emite rulesChanged; resolver el head emite 'released' (no rulesChanged)
+  // addRule emits rulesChanged; resolving the head emits 'released' (no rulesChanged)
   assert.equal(rulesCount, 1);
 });
 
-// ——— Pausa global (congelar tráfico sin matar el subprocess) ———
+// ——— Global pause (freeze traffic without killing the subprocess) ———
 
 test('pipeline: pause encola el mensaje, resume lo entrega en orden', async () => {
   const p = new MITMPipeline();
@@ -308,41 +308,41 @@ test('pipeline: pause encola el mensaje, resume lo entrega en orden', async () =
   const p1 = p.process('c2s', { jsonrpc: '2.0', id: 30, method: 'ping' });
   const p2 = p.process('c2s', { jsonrpc: '2.0', id: 31, method: 'ping' });
 
-  // Aún encolados: ninguna promesa resuelta
+  // Still queued: no promise resolved
   let resolved1 = false;
   let resolved2 = false;
   p1.then(() => { resolved1 = true; });
   p2.then(() => { resolved2 = true; });
   await sleep(10);
-  assert.equal(resolved1, false, 'p1 en cola, no entregado');
-  assert.equal(resolved2, false, 'p2 en cola, no entregado');
+  assert.equal(resolved1, false, 'p1 queued, not delivered');
+  assert.equal(resolved2, false, 'p2 queued, not delivered');
   assert.equal(p.queueLengths().c2s, 2);
 
   p.resume();
   const r1 = await p1;
   const r2 = await p2;
-  assert.ok(r1.msg, 'p1 entregado');
-  assert.ok(r2.msg, 'p2 entregado');
-  assert.deepEqual((r1.msg as { id: number }).id, 30, 'FIFO: p1 primero');
-  assert.deepEqual((r2.msg as { id: number }).id, 31, 'FIFO: p2 segundo');
-  assert.equal(r1.held, false, 'la pausa no es un hold');
+  assert.ok(r1.msg, 'p1 delivered');
+  assert.ok(r2.msg, 'p2 delivered');
+  assert.deepEqual((r1.msg as { id: number }).id, 30, 'FIFO: p1 first');
+  assert.deepEqual((r2.msg as { id: number }).id, 31, 'FIFO: p2 second');
+  assert.equal(r1.held, false, 'a pause is not a hold');
   assert.equal(p.queueLengths().c2s, 0);
 });
 
 test('pipeline: en pausa, el flujo con reglas no retiene — la cola gana', async () => {
   const p = new MITMPipeline();
-  p.addRule('c2s', 'ping'); // regla activa
+  p.addRule('c2s', 'ping'); // active rule
   p.pause();
 
   const promise = p.process('c2s', PING);
   await sleep(10);
-  assert.equal(p.hasHeld, false, 'la pausa encola antes de evaluar reglas');
+  assert.equal(p.hasHeld, false, 'pause queues before evaluating rules');
   assert.equal(p.queueLengths().c2s, 1);
 
-  // resume: el mensaje re-entra al pipeline → ahora sí lo retiene la regla
+  // resume: the message re-enters the pipeline → now the rule holds it
   p.resume();
   await sleep(10);
-  assert.equal(p.hasHeld, true, 'tras resume, la regla retiene el mensaje encolado');
+  assert.equal(p.hasHeld, true, 'after resume, the rule holds the queued message');
   const held = p.listHeld();
   p.resolveHold(held[0]!.id, { action: 'send' });
   const r = await promise;
@@ -354,9 +354,9 @@ test('pipeline: pause/resume emite pausedChanged', async () => {
   const events: boolean[] = [];
   p.on('pausedChanged', (v) => events.push(v));
   p.pause();
-  p.pause(); // idempotente — no debe emitir de nuevo
+  p.pause(); // idempotent — must not emit again
   p.resume();
-  p.resume(); // idempotente
+  p.resume(); // idempotent
   assert.deepEqual(events, [true, false]);
 });
 
@@ -368,7 +368,7 @@ test('pipeline: flushAll con pausa activa libera la cola con originales', async 
 
   await p.flushAll();
   const r = await promise;
-  assert.ok(r.msg, 'flushAll entrega el original');
+  assert.ok(r.msg, 'flushAll delivers the original');
   assert.deepEqual(r.msg, PING);
   assert.equal(p.paused, false);
   assert.equal(p.queueLengths().c2s, 0);
@@ -380,7 +380,7 @@ test('pipeline: resetPause descarta la cola vieja (drop)', async () => {
   const promise = p.process('c2s', PING);
   p.resetPause();
   const r = await promise;
-  assert.equal(r.msg, null, 'resetPause dropea los mensajes de la sesión vieja');
+  assert.equal(r.msg, null, 'resetPause drops messages from the old session');
   assert.equal(p.paused, false);
 });
 
@@ -394,8 +394,8 @@ test('pipeline: pausa no rompe la correlación id→method tras resume', async (
   await reqPromise;
   await respPromise;
 
-  // El request fue observado (c2s se drena primero) → la respuesta correlaciona
+  // The request was observed (c2s drains first) → the response correlates
   const corr = p.correlateResponse('s2c', PING_RESP);
-  assert.ok(corr, 'la correlación sobrevive a la pausa (request observado antes)');
+  assert.ok(corr, 'correlation survives the pause (request observed earlier)');
   assert.equal(corr!.requestMethod, 'ping');
 });

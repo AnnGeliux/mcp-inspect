@@ -1,20 +1,20 @@
 /**
- * Entry point del Electron main process.
- * Crea ventana, carga el renderer Vite, y expone IPC para:
- *   - proxy:start (spawn server + conectar cliente MCP real)
+ * Electron main process entry point.
+ * Creates the window, loads the Vite renderer, and exposes IPC for:
+ *   - proxy:start (spawn server + connect real MCP client)
  *   - proxy:stop / proxy:restart / proxy:kill
- *   - proxy:write (cliente → server, raw)
- *   - client:request / client:notify / client:status (cliente SDK real)
+ *   - proxy:write (client → server, raw)
+ *   - client:request / client:notify / client:status (real SDK client)
  *   - proxy:status
- *   - intercept:* (reglas, holds, resolución)
+ *   - intercept:* (rules, holds, resolution)
  *   - clipboard:write · spec:get/set
  *   - session:export / session:import
  *   - servers:load/save · clients:load/save
  *
- * Phase 5: cada entry se enriquece con latencia (correlación rpcId hecha en
- * el proxy/pipeline) y validación de spec (schemas zod del SDK).
- * Phase 6: el pipeline de interceptación vive en el proxy; aquí solo se
- * expone su control y el push de estado al renderer.
+ * Phase 5: every entry is enriched with latency (rpcId correlation done in
+ * the proxy/pipeline) and spec validation (zod schemas from the SDK).
+ * Phase 6: the interception pipeline lives in the proxy; here we only
+ * expose its control and push state to the renderer.
  */
 
 import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron';
@@ -44,7 +44,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-everything',
       name: 'everything-server (MCP real)',
-      description: 'Server MCP con tools, resources y prompts de prueba',
+      description: 'Test MCP server with tools, resources, and prompts',
       preset: true,
       config: {
         command: process.execPath,
@@ -56,7 +56,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-echo',
       name: 'echo (test)',
-      description: 'Server echo simple para testing de mensajes',
+      description: 'Simple echo server for message testing',
       preset: true,
       config: {
         command: 'node',
@@ -67,7 +67,7 @@ function defaultServers(everythingPath: string): SavedServer[] {
     {
       id: 'preset-echo-crlf',
       name: 'echo CRLF (test)',
-      description: 'Server echo con framing CRLF para testing',
+      description: 'Echo server with CRLF framing for testing',
       preset: true,
       config: {
         command: 'node',
@@ -83,7 +83,7 @@ function defaultClients(): SavedClient[] {
     {
       id: 'preset-sdk',
       name: 'SDK Client (@modelcontextprotocol/sdk)',
-      description: 'Cliente MCP oficial con SDK TypeScript',
+      description: 'Official MCP client with the TypeScript SDK',
       preset: true,
       config: {
         type: 'sdk',
@@ -95,7 +95,7 @@ function defaultClients(): SavedClient[] {
     {
       id: 'preset-inspector',
       name: 'Inspector oficial',
-      description: 'Inspector MCP oficial via npx',
+      description: 'Official MCP inspector via npx',
       preset: true,
       config: {
         type: 'inspector',
@@ -143,11 +143,11 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // necesitamos node en el preload para IPC
+      sandbox: false, // we need node in the preload for IPC
     },
   });
 
-  // Dev: vite dev server. Prod: index.html estático.
+  // Dev: vite dev server. Prod: static index.html.
   const devUrl = process.env['VITE_DEV_SERVER_URL'];
   if (devUrl) {
     mainWindow.loadURL(devUrl);
@@ -158,14 +158,14 @@ function createWindow(): void {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// ——— helpers de entries ————————————————————————————————————————————
+// ——— Entry helpers ————————————————————————————————————————————
 
-/** Validación de spec activada (toggle desde la UI). Default: on. */
+/** Spec validation enabled (toggled from the UI). Default: on. */
 let specValidationOn = true;
 
 function pushEntry(entry: LogEntry): void {
-  // Phase 5 — validación de spec contra schemas zod del SDK.
-  // Solo entries MCP (stderr/lifecycle llevan texto crudo, no JSON-RPC).
+  // Phase 5 — spec validation against zod schemas from the SDK.
+  // Only MCP entries (stderr/lifecycle carry raw text, not JSON-RPC).
   if (specValidationOn && entry.stderr === undefined) {
     const msg = parseEntryMessage(entry);
     if (msg) {
@@ -177,16 +177,16 @@ function pushEntry(entry: LogEntry): void {
   mainWindow?.webContents.send('proxy:entry', entry);
 }
 
-/** Reconstruye el JsonRpcMessage de un entry (para validar contra schemas). */
+/** Rebuilds the JsonRpcMessage of an entry (to validate against schemas). */
 function parseEntryMessage(entry: LogEntry): JsonRpcMessage | null {
   try {
     const m = JSON.parse(entry.raw) as JsonRpcMessage;
     if (m && typeof m === 'object' && 'jsonrpc' in m) return m;
-  } catch { /* synthetic entries ([proxy]/[lifecycle]) llevan texto crudo */ }
+  } catch { /* synthetic entries ([proxy]/[lifecycle]) carry raw text */ }
   return null;
 }
 
-/** Entry sintética para eventos del ciclo de vida (no JSON-RPC). */
+/** Synthetic entry for lifecycle events (not JSON-RPC). */
 function pushLifecycleEntry(kind: 'info' | 'error', message: string): void {
   pushEntry({
     seq: lifecycleSeq++,
@@ -199,9 +199,9 @@ function pushLifecycleEntry(kind: 'info' | 'error', message: string): void {
     stderr: message,
   });
 }
-let lifecycleSeq = 900000; // rango separado para no chocar con seq del proxy/cliente
+let lifecycleSeq = 900000; // separate range to avoid clashing with proxy/client seq
 
-// ——— Proxy listeners (una sola vez) ————————————————————————————————
+// ——— Proxy listeners (registered once) ———————————————————————————
 
 proxy.on('entry', pushEntry);
 proxy.on('exit', (code, signal) => {
@@ -211,7 +211,7 @@ proxy.on('error', (err) => {
   mainWindow?.webContents.send('proxy:error', { message: err.message });
 });
 
-// ——— Interceptación: push de estado del pipeline ————————————————————
+// ——— Interception: push pipeline state ——————————————————————————
 
 function pushInterceptState(): void {
   mainWindow?.webContents.send('intercept:rules', {
@@ -240,7 +240,7 @@ proxy.pipeline.on('queueChanged', () => {
   pushInterceptState();
 });
 
-// ——— Cliente MCP (SDK) —————————————————————————————————————————————
+// ——— MCP client (SDK) ———————————————————————————————————————————
 
 mcpClient.on('connected', (info) => {
   mainWindow?.webContents.send('client:connected', info);
@@ -249,20 +249,20 @@ mcpClient.on('closed', () => {
   mainWindow?.webContents.send('client:closed');
 });
 mcpClient.on('error', (err) => {
-  // "Received a response for an unknown message ID: {payload gigante}" —
-  // respuesta que llega DESPUÉS de que su request expiró (p.ej. retenido en
-  // pausa/hold más tiempo que el timeout del cliente). Se traduce corto:
-  // el payload completo ya es visible como entry s2c en el log.
+  // "Received a response for an unknown message ID: {huge payload}" —
+  // a response arriving AFTER its request expired (e.g. held in
+  // pause/hold longer than the client's timeout). Translated short:
+  // the full payload is already visible as an s2c entry in the log.
   const raw = err instanceof Error ? err.message : String(err);
   const message = raw.startsWith('Received a response for an unknown message ID')
-    ? 'Respuesta huérfana — el request expiró mientras estaba pausado/retenido y el server respondió después. El payload está en el log.'
+    ? 'Orphan response — the request expired while paused/held and the server replied afterwards. The payload is in the log.'
     : raw;
   mainWindow?.webContents.send('client:error', { message });
 });
 
-// ——— helpers de sesión ————————————————————————————————————————————
+// ——— Session helpers ———————————————————————————————————————————
 
-/** Conecta el cliente SDK al proxy (handshake). Loggea el resultado. */
+/** Connects the SDK client to the proxy (handshake). Logs the result. */
 async function connectClientToProxy(): Promise<void> {
   try {
     await mcpClient.connectToProxy(proxy.deliveredWires(), {
@@ -282,7 +282,7 @@ async function connectClientToProxy(): Promise<void> {
 
 ipcMain.handle('proxy:start', async (_evt, config: ServerConfig) => {
   try {
-    // stop de sesión previa (si había)
+    // stop any previous session (if there was one)
     if (proxy.running) {
       await proxy.stop();
     }
@@ -295,11 +295,11 @@ ipcMain.handle('proxy:start', async (_evt, config: ServerConfig) => {
     proxy.pipeline.clearCorrelation();
     proxy.pipeline.resetPause();
 
-    // spawn del server
+    // spawn the server
     proxy.start(config);
     pushLifecycleEntry('info', `server spawned: ${config.command} ${(config.args ?? []).join(' ')}`);
 
-    // conectar cliente MCP real (handshake initialize → initialized)
+    // connect the real MCP client (initialize → initialized handshake)
     if (config.connectClient !== false) {
       await connectClientToProxy();
     }
@@ -320,22 +320,22 @@ ipcMain.handle('proxy:stop', async () => {
   return { ok: true };
 });
 
-/** Pausa MITM: congela TODO el tráfico sin tocar el subprocess. El server
- * sigue vivo — los mensajes se encolan en el pipeline y fluyen al resume. */
+/** MITM pause: freezes ALL traffic without touching the subprocess. The
+ * server stays alive — messages are queued in the pipeline and flow on resume. */
 ipcMain.handle('proxy:pause', async () => {
   proxy.pipeline.pause();
   pushInterceptState();
   return { ok: true, paused: true };
 });
 
-/** Reanuda el tráfico congelado: libera la cola FIFO por el pipeline. */
+/** Resumes frozen traffic: releases the FIFO queue through the pipeline. */
 ipcMain.handle('proxy:resume', async () => {
   proxy.pipeline.resume();
   pushInterceptState();
   return { ok: true, paused: false };
 });
 
-/** Restart: stop + start con la misma config, sin limpiar la sesión loggeada. */
+/** Restart: stop + start with the same config, without clearing the logged session. */
 ipcMain.handle('proxy:restart', async () => {
   if (!sessionConfig) return { ok: false, error: 'no session' };
   const config = sessionConfig;
@@ -361,20 +361,39 @@ ipcMain.handle('proxy:restart', async () => {
   }
 });
 
-/** Kill inmediato del subprocess (SIGKILL — sin gracia). */
+/** Immediate kill of the subprocess (SIGKILL — no grace period). */
 ipcMain.handle('proxy:kill', async () => {
   await proxy.pipeline.flushAll();
   proxy.kill();
   return { ok: true };
 });
 
-// Envío raw (el inspector como cliente manual)
+// Raw send (the inspector as a manual client)
 ipcMain.handle('proxy:write', async (_evt, msg: JsonRpcMessage) => {
   const ok = proxy.writeClientMessage(msg);
   return { ok };
 });
 
-// Request MCP via cliente SDK real
+// MCP client restart (connection reset): disconnect + reconnect to the
+// proxy (initialize → initialized handshake again). The server is NOT touched.
+ipcMain.handle('client:restart', async () => {
+  try {
+    if (!proxy.running) return { ok: false, error: 'server not running' };
+    if (mcpClient.connected) {
+      await mcpClient.stop();
+    }
+    await connectClientToProxy();
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+});
+
+// App version (package.json) to show in the renderer's topbar
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
+// MCP request via the real SDK client
 ipcMain.handle('client:request', async (_evt, args: { method: string; params?: unknown }) => {
   try {
     const result = await mcpClient.request(args.method, args.params);
@@ -385,7 +404,7 @@ ipcMain.handle('client:request', async (_evt, args: { method: string; params?: u
   }
 });
 
-// Notification MCP via cliente SDK real
+// MCP notification via the real SDK client
 ipcMain.handle('client:notify', async (_evt, args: { method: string; params?: unknown }) => {
   try {
     await mcpClient.notify(args.method, args.params);
@@ -396,7 +415,7 @@ ipcMain.handle('client:notify', async (_evt, args: { method: string; params?: un
   }
 });
 
-// Estado del cliente
+// Client status
 ipcMain.handle('client:status', async () => {
   return {
     connected: mcpClient.connected,
@@ -408,7 +427,7 @@ ipcMain.handle('proxy:status', async () => {
   return { running: proxy.running, count: sessionEntries.length };
 });
 
-// ——— Interceptación IPC ————————————————————————————————————————
+// ——— Interception IPC ——————————————————————————————————————————
 
 ipcMain.handle('intercept:list', async () => {
   return {
@@ -463,7 +482,7 @@ ipcMain.handle('clipboard:write', async (_evt, args: { text: string }) => {
   return { ok: true };
 });
 
-// ——— Validación de spec ———————————————————————————————————————————
+// ——— Spec validation ——————————————————————————————————————————
 
 ipcMain.handle('spec:get', async () => ({ enabled: specValidationOn }));
 ipcMain.handle('spec:set', async (_evt, args: { enabled: boolean }) => {
@@ -533,7 +552,7 @@ ipcMain.handle('session:import', async () => {
   sessionConfig = sess.config;
   sessionEntries.length = 0;
   sessionEntries.push(...sess.entries);
-  // Replay al renderer
+  // Replay to the renderer
   for (const e of sess.entries) mainWindow?.webContents.send('proxy:entry', e);
   return { ok: true, count: sess.entries.length };
 });

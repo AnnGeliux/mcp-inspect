@@ -1,6 +1,6 @@
 /**
- * Preload: expone IPC seguro al renderer.
- * contextIsolation: true -> no podemos compartir variables, solo via window.api.
+ * Preload: exposes safe IPC to the renderer.
+ * contextIsolation: true -> we cannot share variables, only via window.api.
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import {
@@ -26,24 +26,30 @@ const api = {
   write: (msg: JsonRpcMessage) => ipcRenderer.invoke('proxy:write', msg),
   status: () => ipcRenderer.invoke('proxy:status'),
 
-  // ---------- cliente MCP real (SDK) ----------
+  // ---------- real MCP client (SDK) ----------
   clientRequest: (method: string, params?: unknown) =>
     ipcRenderer.invoke('client:request', { method, params }),
   clientNotify: (method: string, params?: unknown) =>
     ipcRenderer.invoke('client:notify', { method, params }),
   clientStatus: () => ipcRenderer.invoke('client:status'),
+  /** Reset of the client connection: disconnect + reconnect (handshake). */
+  clientRestart: () => ipcRenderer.invoke('client:restart') as Promise<{ ok: boolean; error?: string }>,
 
-  // ---------- sesion ----------
+  // ---------- session ----------
   exportSession: () => ipcRenderer.invoke('session:export'),
   importSession: () => ipcRenderer.invoke('session:import'),
 
-  // ---------- persistencia de servers/clients ----------
+  // ---------- app ----------
+  /** App version (package.json — semver MAJOR.MINOR.PATCH). */
+  appVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
+
+  // ---------- servers/clients persistence ----------
   loadServers: () => ipcRenderer.invoke('servers:load') as Promise<SavedServer[]>,
   saveServers: (servers: SavedServer[]) => ipcRenderer.invoke('servers:save', servers) as Promise<{ ok: boolean }>,
   loadClients: () => ipcRenderer.invoke('clients:load') as Promise<SavedClient[]>,
   saveClients: (clients: SavedClient[]) => ipcRenderer.invoke('clients:save', clients) as Promise<{ ok: boolean }>,
 
-  // ---------- interceptacion ----------
+  // ---------- interception ----------
   interceptList: () =>
     ipcRenderer.invoke('intercept:list') as Promise<{
       rules: InterceptRule[];
@@ -70,7 +76,7 @@ const api = {
   specGet: () => ipcRenderer.invoke('spec:get'),
   specSet: (enabled: boolean) => ipcRenderer.invoke('spec:set', { enabled }),
 
-  // ---------- eventos push ----------
+  // ---------- push events ----------
   onEntry: (cb: (e: LogEntry) => void) => {
     const handler = (_: unknown, e: LogEntry) => cb(e);
     ipcRenderer.on('proxy:entry', handler);

@@ -20,6 +20,8 @@ interface Props {
   onCallEcho: () => void;
   onCallLongRunning: () => void;
   onSendRaw: (msg: string) => void;
+  /** Reset the MCP client: disconnect + reconnect (fresh handshake). */
+  onClientRestart: () => void;
   onExport: () => void;
   onImport: () => void;
 }
@@ -43,6 +45,7 @@ export default function ClientPanel(props: Props): React.ReactElement {
     onCallEcho,
     onCallLongRunning,
     onSendRaw,
+    onClientRestart,
     onExport,
     onImport,
   } = props;
@@ -123,12 +126,21 @@ export default function ClientPanel(props: Props): React.ReactElement {
         <span className={`role-tag ${clientConnected ? 'green' : ''}`}>
           {clientConnected ? 'connected' : 'idle'}
         </span>
+        {clientConnected && (
+          <button
+            className="header-btn client"
+            onClick={onClientRestart}
+            title="Reset the client: disconnect and reconnect to the proxy (initialize → initialized handshake again)"
+          >
+            ↻ Reset
+          </button>
+        )}
       </div>
       <div className="panel-body">
         {/* Card grid */}
         {editMode === 'none' && (
           <div className="card-grid-section">
-            <div className="card-grid-label">Clients disponibles</div>
+            <div className="card-grid-label">Available clients</div>
             <div className="card-grid">
               {clients.map((c) => (
                 <ClientCard
@@ -141,9 +153,9 @@ export default function ClientPanel(props: Props): React.ReactElement {
                   onDelete={() => handleDelete(c.id)}
                 />
               ))}
-              <button className="card card-add" onClick={startAdd} title="Agregar client custom">
+              <button className="card card-add" onClick={startAdd} title="Add a custom client">
                 <span className="card-icon">＋</span>
-                <span className="card-name">Agregar</span>
+                <span className="card-name">Add</span>
               </button>
             </div>
           </div>
@@ -152,17 +164,17 @@ export default function ClientPanel(props: Props): React.ReactElement {
         {/* Add / Edit form with collapsible sections */}
         {editMode !== 'none' && (
           <div className="endpoint-card edit-form slide-in">
-            <div className="form-label">{editMode === 'add' ? 'Nuevo client' : 'Editar client'}</div>
+            <div className="form-label">{editMode === 'add' ? 'New client' : 'Edit client'}</div>
 
             {/* ——— Basic section (always visible) ——— */}
             <div className="form-section-basic">
-              <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre descriptivo" />
+              <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Descriptive name" />
               <select className="dropdown" style={{ marginTop: 8 }} value={editType} onChange={(e) => setEditType(e.target.value as 'sdk' | 'inspector')}>
                 <option value="sdk">SDK (@modelcontextprotocol/sdk)</option>
-                <option value="inspector">Inspector oficial</option>
+                <option value="inspector">Official Inspector</option>
               </select>
-              <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-              <input className="cmd-input" style={{ marginTop: 8 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Command (e.g. npx)" />
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Short description (optional)" />
 
               {/* Basic preview */}
               <div className="cmd-preview" style={{ marginTop: 8 }}>
@@ -178,25 +190,25 @@ export default function ClientPanel(props: Props): React.ReactElement {
               type="button"
             >
               <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
-              <span>⚙ Avanzado</span>
+              <span>⚙ Advanced</span>
             </button>
 
             {/* ——— Advanced section (collapsible) ——— */}
             <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
               <div className="form-section-advanced-inner">
                 <div className="form-field">
-                  <label className="form-field-label">Args (uno por línea)</label>
+                  <label className="form-field-label">Args (one per line)</label>
                   <textarea className="cmd-input args" value={editArgs} onChange={(e) => setEditArgs(e.target.value)} placeholder={'@modelcontextprotocol/inspector'} rows={4} />
                 </div>
 
                 <div className="form-field" style={{ marginTop: 8 }}>
-                  <label className="form-field-label">Variables de entorno (KEY=VALUE, una por línea)</label>
+                  <label className="form-field-label">Environment variables (KEY=VALUE, one per line)</label>
                   <textarea className="cmd-input args" value={editEnv} onChange={(e) => setEditEnv(e.target.value)} placeholder={'NODE_ENV=development'} rows={3} />
                 </div>
 
                 {/* Full preview (with env + args) */}
                 <div className="cmd-preview" style={{ marginTop: 8 }}>
-                  <span className="cmd-preview-label">Preview completo</span>
+                  <span className="cmd-preview-label">Full preview</span>
                   <code className="cmd-preview-code">{fullPreview || '—'}</code>
                 </div>
               </div>
@@ -204,28 +216,28 @@ export default function ClientPanel(props: Props): React.ReactElement {
 
             {/* ——— Action buttons ——— */}
             <div className="crud-row" style={{ marginTop: 8 }}>
-              <button className="btn primary small" onClick={saveEdit} disabled={!editName.trim() || !editCommand.trim()}>✓ Guardar</button>
-              <button className="btn small" onClick={cancelEdit}>✕ Cancelar</button>
+              <button className="btn primary small" onClick={saveEdit} disabled={!editName.trim() || !editCommand.trim()}>✓ Save</button>
+              <button className="btn small" onClick={cancelEdit}>✕ Cancel</button>
             </div>
           </div>
         )}
 
-        {/* Estado + interaction */}
+        {/* Status + interaction */}
         {editMode === 'none' && (
           <>
             <div className="endpoint-card">
-              <div className="label">Estado</div>
+              <div className="label">Status</div>
               {clientConnected ? (
                 <div className="value">
-                  Cliente MCP real (SDK <span className="mono">@modelcontextprotocol/sdk</span>) conectado
-                  {serverInfo?.name ? ` a "${serverInfo.name}" v${serverInfo.version}` : ''}.
-                  Handshake initialize → initialized completado.
+                  Real MCP client (SDK <span className="mono">@modelcontextprotocol/sdk</span>) connected
+                  {serverInfo?.name ? ` to "${serverInfo.name}" v${serverInfo.version}` : ''}.
+                  Handshake initialize → initialized completed.
                 </div>
               ) : (
                 <div className="value">
                   {hasSelection
-                    ? 'Inicia el server — el cliente se conecta y ejecuta el handshake automáticamente.'
-                    : 'Selecciona un server y un client para comenzar.'}
+                    ? 'Start the server — the client connects and runs the handshake automatically.'
+                    : 'Select a server and a client to get started.'}
                 </div>
               )}
             </div>
@@ -239,16 +251,16 @@ export default function ClientPanel(props: Props): React.ReactElement {
 
             <div className="action-row" style={{ flexDirection: 'column', gap: 6 }}>
               <span className="label" style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>
-                Interacción cliente → server
+                Client → server interaction
               </span>
-              <button className="btn primary" onClick={onPing} disabled={interactionDisabled} title="Enviar ping al server">📡 ping</button>
-              <button className="btn" onClick={onListTools} disabled={interactionDisabled} title="Listar herramientas del server">📋 tools/list</button>
-              <button className="btn" onClick={onCallEcho} disabled={interactionDisabled} title="Llamar herramienta echo">🔧 tools/call — echo</button>
-              <button className="btn" onClick={onCallLongRunning} disabled={interactionDisabled} title="Operación larga con progreso">⏳ tools/call — longRunning</button>
+              <button className="btn primary" onClick={onPing} disabled={interactionDisabled} title="Send a ping to the server">📡 ping</button>
+              <button className="btn" onClick={onListTools} disabled={interactionDisabled} title="List the server's tools">📋 tools/list</button>
+              <button className="btn" onClick={onCallEcho} disabled={interactionDisabled} title="Call the echo tool">🔧 tools/call — echo</button>
+              <button className="btn" onClick={onCallLongRunning} disabled={interactionDisabled} title="Long-running operation with progress">⏳ tools/call — longRunning</button>
             </div>
 
             <div className="endpoint-card" style={{ marginTop: 12 }}>
-              <div className="label">Último resultado</div>
+              <div className="label">Last result</div>
               {lastToolResult ? (
                 <JsonHighlight data={lastToolResult} maxHeight={220} />
               ) : (
@@ -257,14 +269,14 @@ export default function ClientPanel(props: Props): React.ReactElement {
             </div>
 
             <div className="endpoint-card">
-              <div className="label">Envío raw (JSON-RPC)</div>
+              <div className="label">Raw send (JSON-RPC)</div>
               <textarea className="cmd-input args" rows={3} value={rawInput} onChange={(e) => setRawInput(e.target.value)} placeholder={'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'} disabled={interactionDisabled} />
-              <button className="btn" style={{ marginTop: 6 }} onClick={() => { onSendRaw(rawInput); }} disabled={interactionDisabled || !rawInput.trim()} title="Enviar mensaje JSON-RPC raw">⬆ Enviar raw</button>
+              <button className="btn" style={{ marginTop: 6 }} onClick={() => { onSendRaw(rawInput); }} disabled={interactionDisabled || !rawInput.trim()} title="Send a raw JSON-RPC message">⬆ Send raw</button>
             </div>
 
             <div className="action-row" style={{ marginTop: 12 }}>
-              <button className="btn" onClick={onExport} title="Exportar sesión a archivo">⤓ Exportar</button>
-              <button className="btn" onClick={onImport} title="Importar sesión desde archivo">⤒ Importar</button>
+              <button className="btn" onClick={onExport} title="Export the session to a file">⤓ Export</button>
+              <button className="btn" onClick={onImport} title="Import a session from a file">⤒ Import</button>
             </div>
           </>
         )}

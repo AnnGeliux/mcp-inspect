@@ -1,10 +1,10 @@
 /**
- * Test end-to-end del flujo completo del inspector:
+ * End-to-end test of the full inspector flow:
  *   StdioProxy (spawn everything-server real) + McpClientController (SDK real)
  *
- * Verifica que el cliente SDK hace handshake initialize → initialized sobre
- * los wires del proxy, que las interacciones tools/list + tools/call pasan
- * por el MITM y que las entries c2s/s2c quedan registradas en la timeline.
+ * Verifies that the SDK client performs the initialize → initialized handshake
+ * over the proxy wires, that tools/list + tools/call interactions go through
+ * the MITM, and that c2s/s2c entries are recorded in the timeline.
  *
  * Ejecutar: npx tsx tests/client.demo.ts
  */
@@ -29,9 +29,9 @@ async function main() {
   const client = new McpClientController();
 
   proxy.on('entry', (e) => entries.push(e));
-  // (el logging está centralizado en el proxy — el cliente ya no emite entries)
+  // (logging is centralized in the proxy — the client no longer emits entries)
 
-  // 1. Spawn del server real via proxy
+  // 1. Spawn the real server via the proxy
   console.log('[1] Spawning everything-server (real MCP server)…');
   proxy.start({
     command: process.execPath,
@@ -40,33 +40,33 @@ async function main() {
   });
   await sleep(300);
 
-  // 2. Conectar cliente SDK real al proxy → handshake
+  // 2. Connect the real SDK client to the proxy → handshake
   console.log('[2] Connecting SDK client → handshake initialize/initialized…');
-  // deliveredWires: sends por el pipeline (interceptables), receives solo lo entregado
+  // deliveredWires: sends go through the pipeline (interceptable), receives only what is delivered
   await client.connectToProxy(proxy.deliveredWires(), { name: 'inspector-test-client', version: '0.1.0' });
   const info = client.getServerInfo();
   console.log(`    server: "${info.name}" v${info.version}`);
   console.log(`    capabilities: ${Object.keys((info.capabilities as Record<string, unknown>) ?? {}).join(', ')}`);
 
-  // 3. Interacción: tools/list
+  // 3. Interaction: tools/list
   console.log('\n[3] tools/list…');
   const tools = await client.request('tools/list') as { tools: Array<{ name: string }> };
   console.log(`    ${tools.tools.length} tools: ${tools.tools.slice(0, 8).map((t) => t.name).join(', ')}…`);
 
-  // 4. Interacción: tools/call echo
+  // 4. Interaction: tools/call echo
   console.log('\n[4] tools/call echo…');
   const echo = await client.request('tools/call', {
     name: 'echo',
-    arguments: { message: 'hola desde el cliente real' },
+    arguments: { message: 'hello from the real client' },
   }) as { content: Array<{ text?: string }> };
   console.log(`    echo → ${echo.content?.[0]?.text?.slice(0, 60)}`);
 
-  // 5. Interacción: ping
+  // 5. Interaction: ping
   console.log('\n[5] ping…');
   await client.request('ping');
   console.log('    pong OK');
 
-  // 6. Timeline resultante
+  // 6. Resulting timeline
   await sleep(200);
   console.log(`\n[6] Timeline MITM (${entries.length} entries):`);
   for (const e of entries) {
@@ -77,7 +77,6 @@ async function main() {
     );
   }
 
-  // 7. Verificación
   const hasInit = entries.some((e) => e.dir === 'c2s' && e.method === 'initialize');
   const hasInitResp = entries.some((e) => e.dir === 's2c' && e.kind === 'response' && e.result && typeof e.result === 'object' && 'protocolVersion' in (e.result as Record<string, unknown>));
   const hasNotif = entries.some((e) => e.method === 'notifications/initialized');
@@ -93,19 +92,19 @@ async function main() {
       e.result !== null &&
       'tools' in (e.result as Record<string, unknown>)
   ).length;
-  const noDupes = toolsListC2s === 1 && toolsListResp === 1; // exactamente 1 request + 1 response
-
-  console.log('\n[7] Verificación:');
-  console.log(`    initialize c2s:        ${hasInit ? '✓' : '✗ FALTA'}`);
-  console.log(`    initialize response:   ${hasInitResp ? '✓' : '✗ FALTA'}`);
-  console.log(`    notifications/initialized: ${hasNotif ? '✓' : '✗ FALTA'}`);
-  console.log(`    tools/list c2s+s2c:    ${hasToolsList ? '✓' : '✗ FALTA'}`);
-  console.log(`    tools/call echo:       ${hasEcho ? '✓' : '✗ FALTA'}`);
-  console.log(`    ping:                  ${hasPing ? '✓' : '✗ FALTA'}`);
-  console.log(`    sin duplicados:        ${noDupes ? '✓' : '✗ HAY DUPES'}`);
+  const noDupes = toolsListC2s === 1 && toolsListResp === 1; // exactly 1 request + 1 response
+  // 7. Verification
+  console.log('\n[7] Verification:');
+  console.log(`    initialize c2s:        ${hasInit ? '✓' : '✗ MISSING'}`);
+  console.log(`    initialize response:   ${hasInitResp ? '✓' : '✗ MISSING'}`);
+  console.log(`    notifications/initialized: ${hasNotif ? '✓' : '✗ MISSING'}`);
+  console.log(`    tools/list c2s+s2c:    ${hasToolsList ? '✓' : '✗ MISSING'}`);
+  console.log(`    tools/call echo:       ${hasEcho ? '✓' : '✗ MISSING'}`);
+  console.log(`    ping:                  ${hasPing ? '✓' : '✗ MISSING'}`);
+  console.log(`    no duplicates:         ${noDupes ? '✓' : '✗ DUPLICATES'}`);
 
   const allOk = hasInit && hasInitResp && hasNotif && hasToolsList && hasEcho && hasPing && noDupes;
-  console.log(`\n${allOk ? '✅ TODO OK — cliente real + server real interactuando via MITM' : '❌ FALLÓ algo'}`);
+  console.log(`\n${allOk ? '✅ ALL OK — real client + real server interacting via MITM' : '❌ SOMETHING FAILED'}`);
 
   // 8. Cleanup
   await client.stop();

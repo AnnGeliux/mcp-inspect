@@ -1,5 +1,5 @@
 /**
- * Tests de validación de spec MCP (Phase 5).
+ * MCP spec validation tests (Phase 5).
  *
  * Run with: node --test --import tsx tests/specvalidation.test.ts
  */
@@ -20,11 +20,11 @@ const initReq: JsonRpcMessage = {
   },
 };
 
-// ——— Requests válidos ————————————————————————————————————
+// ——— Valid requests ———————————————————————————————————————
 
 test('spec: initialize válido pasa', () => {
   const r = validateSpec(initReq);
-  assert.ok(r, 'debe validar');
+  assert.ok(r, 'should validate');
   assert.equal(r!.ok, true);
 });
 
@@ -39,7 +39,7 @@ test('spec: tools/call válido pasa', () => {
     jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: { name: 'echo', arguments: { message: 'hola' } },
+    params: { name: 'echo', arguments: { message: 'hello' } },
   });
   assert.ok(r);
   assert.equal(r!.ok, true);
@@ -51,7 +51,7 @@ test('spec: notification initialized válida pasa', () => {
   assert.equal(r!.ok, true);
 });
 
-// ——— Requests inválidos ——————————————————————————————————
+// ——— Invalid requests ————————————————————————————————————
 
 test('spec: initialize sin protocolVersion falla', () => {
   const r = validateSpec({
@@ -61,8 +61,8 @@ test('spec: initialize sin protocolVersion falla', () => {
     params: { capabilities: {}, clientInfo: { name: 'x', version: '0' } },
   });
   assert.ok(r);
-  assert.equal(r!.ok, false, 'protocolVersion es requerido por la spec');
-  assert.ok(r!.issues, 'debe describir el issue');
+  assert.equal(r!.ok, false, 'protocolVersion is required by the spec');
+  assert.ok(r!.issues, 'must describe the issue');
 });
 
 test('spec: tools/call sin name falla', () => {
@@ -73,7 +73,7 @@ test('spec: tools/call sin name falla', () => {
     params: { arguments: {} },
   });
   assert.ok(r);
-  assert.equal(r!.ok, false, 'name es requerido en tools/call');
+  assert.equal(r!.ok, false, 'name is required in tools/call');
 });
 
 test('spec: initialize con clientInfo incompleto falla', () => {
@@ -84,7 +84,7 @@ test('spec: initialize con clientInfo incompleto falla', () => {
     params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'x' } },
   });
   assert.ok(r);
-  assert.equal(r!.ok, false, 'clientInfo.version es requerido');
+  assert.equal(r!.ok, false, 'clientInfo.version is required');
 });
 
 // ——— Responses ————————————————————————————————————————————
@@ -113,21 +113,21 @@ test('spec: response de tools/list con tools[] válida', () => {
 test('spec: response de tools/list SIN tools[] falla', () => {
   const r = validateSpec({ jsonrpc: '2.0', id: 3, result: { nope: true } }, 'tools/list');
   assert.ok(r);
-  assert.equal(r!.ok, false, 'tools es requerido en ListToolsResult');
+  assert.equal(r!.ok, false, 'tools is required in ListToolsResult');
 });
 
 test('spec: response sin requestMethod → framing genérico', () => {
   const r = validateSpec({ jsonrpc: '2.0', id: 3, result: { anything: true } });
   assert.ok(r);
-  assert.equal(r!.ok, true, 'sin correlación solo valida framing base');
+  assert.equal(r!.ok, true, 'without correlation only base framing is validated');
 });
 
-// ——— Métodos desconocidos ————————————————————————————————
+// ——— Unknown methods ———————————————————————————————————————
 
 test('spec: método custom desconocido valida contra framing base', () => {
   const r = validateSpec({ jsonrpc: '2.0', id: 9, method: 'custom/experimental', params: { x: 1 } });
   assert.ok(r);
-  assert.equal(r!.ok, true, 'métodos custom pasan el framing genérico');
+  assert.equal(r!.ok, true, 'custom methods pass the generic framing');
 });
 
 test('spec: mensaje que no es JSON-RPC falla el framing', () => {
@@ -155,7 +155,7 @@ test('spec: notification progress sin progressToken falla', () => {
     params: { progress: 1 },
   });
   assert.ok(r);
-  assert.equal(r!.ok, false, 'progressToken es requerido');
+  assert.equal(r!.ok, false, 'progressToken is required');
 });
 
 test('spec: notifications/cancelled válida', () => {

@@ -12,7 +12,7 @@ interface Props {
   onDelete: () => void;
 }
 
-/** Icono emoji derivado del nombre/ID del server. */
+/** Emoji icon derived from the server's name/ID. */
 function serverIcon(server: SavedServer): string {
   const n = server.name.toLowerCase();
   if (n.includes('everything')) return '🧩';
@@ -81,7 +81,7 @@ export default function ServerCard({
         <div className="card-actions">
           <button
             className="card-action-btn"
-            title="Editar"
+            title="Edit"
             onClick={(e) => { e.stopPropagation(); onEdit(); }}
           >
             ✎
@@ -89,10 +89,10 @@ export default function ServerCard({
           {!isPreset && (
             <button
               className="card-action-btn danger"
-              title="Eliminar"
+              title="Delete"
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`¿Eliminar el server "${server.name}"?`)) onDelete();
+                if (confirm(`Delete server "${server.name}"?`)) onDelete();
               }}
             >
               🗑

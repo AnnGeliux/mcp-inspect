@@ -1,17 +1,17 @@
 /**
- * Validación de tramas contra la spec oficial MCP (Phase 5).
+ * Frame validation against the official MCP spec (Phase 5).
  *
- * Cada mensaje JSON-RPC que cruza el proxy se valida contra los schemas
- * zod que empaqueta el propio SDK (@modelcontextprotocol/sdk/types.js —
- * 155 schemas derivados de la spec 2025-06-18 + erratas 2026-07-28).
+ * Every JSON-RPC message crossing the proxy is validated against the zod
+ * schemas shipped by the SDK itself (@modelcontextprotocol/sdk/types.js —
+ * 155 schemas derived from the 2025-06-18 spec + 2026-07-28 errata).
  *
- * La validación es no-bloqueante: solo produce SpecCheck { ok, issues } que
- * se adjunta al LogEntry y se muestra como badge visual en la UI. Nunca
- * altera el mensaje.
+ * Validation is non-blocking: it only produces a SpecCheck { ok, issues }
+ * that gets attached to the LogEntry and shown as a visual badge in the
+ * UI. It never alters the message.
  *
- * Mapa método→schema cubre los métodos estándar del protocolo. Mensajes con
- * método desconocido (custom/experimental) se validan contra el schema base
- * JSONRPCMessageSchema (framing correcto, sin shape específico).
+ * The method→schema map covers the standard protocol methods. Messages
+ * with an unknown (custom/experimental) method are validated against the
+ * base JSONRPCMessageSchema (correct framing, no specific shape).
  */
 
 import {
@@ -79,7 +79,7 @@ import { JsonRpcMessage, SpecCheck, Direction } from '../shared/types';
 
 type Schema = z.ZodTypeAny;
 
-/** request method → schema del request completo. */
+/** request method → schema of the full request. */
 const REQUEST_SCHEMAS: Record<string, Schema> = {
   initialize: InitializeRequestSchema,
   ping: PingRequestSchema,
@@ -103,7 +103,7 @@ const REQUEST_SCHEMAS: Record<string, Schema> = {
   'tasks/result': GetTaskPayloadRequestSchema,
 };
 
-/** notification method → schema de la notificación completa. */
+/** notification method → schema of the full notification. */
 const NOTIFICATION_SCHEMAS: Record<string, Schema> = {
   'notifications/initialized': InitializedNotificationSchema,
   'notifications/cancelled': CancelledNotificationSchema,
@@ -118,7 +118,7 @@ const NOTIFICATION_SCHEMAS: Record<string, Schema> = {
   'notifications/tasks/status': TaskStatusNotificationSchema,
 };
 
-/** rpcId → schema del result (responses se validan contra el result schema del método originante). */
+/** rpcId → result schema (responses are validated against the originating method's result schema). */
 const RESULT_SCHEMAS: Record<string, Schema> = {
   initialize: InitializeResultSchema,
   ping: EmptyResultSchema,
@@ -139,7 +139,7 @@ const RESULT_SCHEMAS: Record<string, Schema> = {
   'tasks/result': GetTaskPayloadResultSchema,
 };
 
-/** Resultado con task (2026-07-28 era) — CreateTaskResultSchema via tasks/list response. */
+/** Result containing a task (2026-07-28 era) — CreateTaskResultSchema via tasks/list response. */
 const TASK_RESULT_SCHEMAS: Record<string, Schema> = {
   'tasks/create': CreateTaskResultSchema,
 };
@@ -157,50 +157,50 @@ function isResponse(m: JsonRpcMessage): boolean {
 }
 
 /**
- * Valida un mensaje contra la spec MCP.
- * @param msg Mensaje JSON-RPC tal como cruzó el wire.
- * @param requestMethod Método del request originante (responses no llevan method) —
- *        el correlador de latencia lo resuelve; si es undefined, se intenta solo
- *        con JSONRPCMessageSchema (framing genérico).
+ * Validates a message against the MCP spec.
+ * @param msg JSON-RPC message exactly as it crossed the wire.
+ * @param requestMethod Method of the originating request (responses carry no method) —
+ *        resolved by the latency correlator; if undefined, only
+ *        JSONRPCMessageSchema is tried (generic framing).
  */
 export function validateSpec(msg: JsonRpcMessage, requestMethod?: string): SpecCheck | null {
-  // 1. Framing JSON-RPC base — SIEMPRE (todo mensaje debe parsearlo)
+  // 1. Base JSON-RPC framing — ALWAYS (every message must parse it)
   const framing = JSONRPCMessageSchema.safeParse(msg);
   if (!framing.success) {
     return { ok: false, issues: formatIssues(framing.error.issues) };
   }
 
-  // 2. Schema específico por tipo de mensaje
+  // 2. Message-type-specific schema
   if ('method' in msg && 'id' in msg) {
-    // request: el schema describe el mensaje completo (method + params)
+    // request: the schema describes the full message (method + params)
     const schema = REQUEST_SCHEMAS[msg.method];
-    if (!schema) return { ok: true }; // método custom/experimental — framing OK
+    if (!schema) return { ok: true }; // custom/experimental method — framing OK
     const r = schema.safeParse(msg);
     return r.success ? { ok: true } : { ok: false, issues: formatIssues(r.error.issues) };
   }
 
   if ('method' in msg) {
-    // notification: el schema describe el mensaje completo
+    // notification: the schema describes the full message
     const schema = NOTIFICATION_SCHEMAS[msg.method];
     if (!schema) return { ok: true };
     const r = schema.safeParse(msg);
     return r.success ? { ok: true } : { ok: false, issues: formatIssues(r.error.issues) };
   }
 
-  // response: el RESULT schema describe el PAYLOAD (msg.result), no el wrapper
+  // response: the RESULT schema describes the PAYLOAD (msg.result), not the wrapper
   if ('error' in msg && msg.error) {
-    return { ok: true }; // error response — JSONRPCError ya validado por el framing
+    return { ok: true }; // error response — JSONRPCError already validated by the framing
   }
   const resultSchema = requestMethod
     ? RESULT_SCHEMAS[requestMethod] ?? TASK_RESULT_SCHEMAS[requestMethod]
     : undefined;
-  if (!resultSchema) return { ok: true }; // sin correlación — solo framing
+  if (!resultSchema) return { ok: true }; // no correlation — framing only
   const payload = 'result' in msg ? msg.result : undefined;
   const r = resultSchema.safeParse(payload);
   return r.success ? { ok: true } : { ok: false, issues: formatIssues(r.error.issues) };
 }
 
-/** Primeros 2 issues formateados compactos. */
+/** First 2 issues, compactly formatted. */
 function formatIssues(issues: z.ZodIssue[]): string {
   return issues
     .slice(0, 2)
@@ -209,22 +209,22 @@ function formatIssues(issues: z.ZodIssue[]): string {
 }
 
 /**
- * Valida una trama ya clasificada como entry (usado en pushEntry del main).
- * Igual que validateSpec pero acepta entries del timeline (para re-validar
- * sesiones importadas).
+ * Validates a frame already classified as an entry (used in pushEntry in main).
+ * Same as validateSpec but accepts timeline entries (to re-validate
+ * imported sessions).
  */
 export function validateEntrySpec(
   entry: { kind: string; method?: string; raw: string; stderr?: string },
   requestMethod?: string,
 ): SpecCheck | null {
-  if (entry.stderr) return null; // stderr no es canal MCP
+  if (entry.stderr) return null; // stderr is not an MCP channel
   if (entry.kind === 'request' || entry.kind === 'notification') {
     // parse raw → validate
     try {
       const msg = JSON.parse(entry.raw) as JsonRpcMessage;
       return validateSpec(msg, requestMethod);
     } catch {
-      return { ok: false, issues: 'no es JSON válido' };
+      return { ok: false, issues: 'not valid JSON' };
     }
   }
   if (entry.kind === 'response' || entry.kind === 'error') {
@@ -232,7 +232,7 @@ export function validateEntrySpec(
       const msg = JSON.parse(entry.raw) as JsonRpcMessage;
       return validateSpec(msg, requestMethod);
     } catch {
-      // entries sintéticas ([proxy]/[lifecycle] llevan raw texto, no JSON) → no validar
+      // synthetic entries ([proxy]/[lifecycle] carry plain-text raw, not JSON) → don't validate
       return null;
     }
   }

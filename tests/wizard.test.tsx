@@ -48,7 +48,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
 test('Wizard: starts on step 1 (server selection)', () => {
   const { container, cleanup } = render(React.createElement(Wizard, makeProps()));
   const stepText = text(container.querySelector('.wizard-progress-text'));
-  assert.ok(stepText.includes('Paso 1 de 2'), `should show step 1, got: ${stepText}`);
+  assert.ok(stepText.includes('Step 1 of 2'), `should show step 1, got: ${stepText}`);
   assert.ok(stepText.includes('Server'), 'should mention Server selection');
   cleanup();
 });
@@ -58,7 +58,7 @@ test('Wizard: step 2 shows client selection text', () => {
     React.createElement(Wizard, makeProps({ step: 2 })),
   );
   const stepText = text(container.querySelector('.wizard-progress-text'));
-  assert.ok(stepText.includes('Paso 2 de 2'), `should show step 2, got: ${stepText}`);
+  assert.ok(stepText.includes('Step 2 of 2'), `should show step 2, got: ${stepText}`);
   assert.ok(stepText.includes('Client'), 'should mention Client selection');
   cleanup();
 });
@@ -91,8 +91,8 @@ test('Wizard: clicking Siguiente advances from step 1 to step 2', () => {
     ),
   );
   const btn = container.querySelector('.btn.primary') as HTMLElement;
-  assert.ok(btn, 'should have a primary button (Siguiente)');
-  assert.ok(text(btn).includes('Siguiente'), 'button should say Siguiente');
+  assert.ok(btn, 'should have a primary button (Next)');
+  assert.ok(text(btn).includes('Next'), 'button should say Next');
   click(btn);
   assert.ok(advanceCalled, 'onAdvance should be called');
   cleanup();
@@ -120,7 +120,7 @@ test('Wizard: Atrás button appears on step 2', () => {
   );
   const backBtn = container.querySelector('.wizard-nav .btn');
   assert.ok(backBtn, 'should have a back button on step 2');
-  assert.ok(text(backBtn as HTMLElement).includes('Atrás'), 'button should say Atrás');
+  assert.ok(text(backBtn as HTMLElement).includes('Back'), 'button should say Back');
   cleanup();
 });
 
@@ -168,6 +168,6 @@ test('Wizard: step 2 with selected client shows ¡Listo! button', () => {
   );
   const btn = container.querySelector('.wizard-nav .btn.primary') as HTMLElement;
   assert.ok(btn, 'should have a primary button');
-  assert.ok(text(btn).includes('Listo'), 'should say ¡Listo! when client is selected');
+  assert.ok(text(btn).includes('Done'), 'should say Done! when client is selected');
   cleanup();
 });

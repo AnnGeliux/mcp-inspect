@@ -49,7 +49,7 @@ export default function Wizard(props: Props): React.ReactElement {
             <div className={`wizard-dot ${step >= 2 ? 'active' : ''}`}>2</div>
           </div>
           <span className="wizard-progress-text">
-            {step === 1 ? 'Paso 1 de 2 — Elige un MCP Server' : 'Paso 2 de 2 — Elige un MCP Client'}
+            {step === 1 ? 'Step 1 of 2 — Choose an MCP Server' : 'Step 2 of 2 — Choose an MCP Client'}
           </span>
         </div>
 
@@ -80,13 +80,13 @@ export default function Wizard(props: Props): React.ReactElement {
 
         <div className="wizard-nav">
           {step === 2 && (
-            <button className="btn" onClick={onBack}>← Atrás</button>
+            <button className="btn" onClick={onBack}>← Back</button>
           )}
           {step === 1 && selectedServerId && (
-            <button className="btn primary" onClick={onAdvance}>Siguiente →</button>
+            <button className="btn primary" onClick={onAdvance}>Next →</button>
           )}
           {step === 2 && selectedClientId && (
-            <button className="btn primary" onClick={onAdvance}>¡Listo! →</button>
+            <button className="btn primary" onClick={onAdvance}>Done! →</button>
           )}
         </div>
       </div>
@@ -125,8 +125,8 @@ function ServerStep(props: ServerStepProps): React.ReactElement {
 
   return (
     <div className="wizard-step">
-      <h2 className="wizard-title">📡 Elige un MCP Server</h2>
-      <p className="wizard-subtitle">Selecciona un server predefinido o agrega uno custom</p>
+      <h2 className="wizard-title">📡 Choose an MCP Server</h2>
+      <p className="wizard-subtitle">Select a predefined server or add a custom one</p>
       <div className="card-grid">
         {servers.map((s) => (
           <ServerCard
@@ -140,17 +140,17 @@ function ServerStep(props: ServerStepProps): React.ReactElement {
           />
         ))}
         {!showAddForm && (
-          <button className="card card-add" onClick={() => setShowAddForm(true)} title="Agregar server custom">
+          <button className="card card-add" onClick={() => setShowAddForm(true)} title="Add a custom server">
             <span className="card-icon">＋</span>
-            <span className="card-name">Agregar custom</span>
+            <span className="card-name">Add custom</span>
           </button>
         )}
       </div>
       {showAddForm && (
         <div className="wizard-add-form">
-          <input className="cmd-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre descriptivo" />
-          <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+          <input className="cmd-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Descriptive name" />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. npx)" />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Short description (optional)" />
           <div className="cmd-preview" style={{ marginTop: 8 }}>
             <span className="cmd-preview-label">Preview</span>
             <code className="cmd-preview-code">{basicPreview || '—'}</code>
@@ -162,16 +162,16 @@ function ServerStep(props: ServerStepProps): React.ReactElement {
             style={{ marginTop: 8 }}
           >
             <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
-            <span>⚙ Avanzado</span>
+            <span>⚙ Advanced</span>
           </button>
           <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
             <div className="form-section-advanced-inner">
-              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (one per line)'} rows={4} />
             </div>
           </div>
           <div className="crud-row" style={{ marginTop: 8 }}>
-            <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Guardar</button>
-            <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancelar</button>
+            <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Save</button>
+            <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancel</button>
           </div>
         </div>
       )}
@@ -211,8 +211,8 @@ function ClientStep(props: ClientStepProps): React.ReactElement {
 
   return (
     <div className="wizard-step">
-      <h2 className="wizard-title">🧑‍💻 Elige un MCP Client</h2>
-      <p className="wizard-subtitle">Selecciona un client predefinido o agrega uno custom</p>
+      <h2 className="wizard-title">🧑‍💻 Choose an MCP Client</h2>
+      <p className="wizard-subtitle">Select a predefined client or add a custom one</p>
       <div className="card-grid">
         {clients.map((c) => (
           <ClientCard
@@ -226,21 +226,21 @@ function ClientStep(props: ClientStepProps): React.ReactElement {
           />
         ))}
         {!showAddForm && (
-          <button className="card card-add" onClick={() => setShowAddForm(true)} title="Agregar client custom">
+          <button className="card card-add" onClick={() => setShowAddForm(true)} title="Add a custom client">
             <span className="card-icon">＋</span>
-            <span className="card-name">Agregar custom</span>
+            <span className="card-name">Add custom</span>
           </button>
         )}
       </div>
       {showAddForm && (
         <div className="wizard-add-form">
-          <input className="cmd-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre descriptivo" />
+          <input className="cmd-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Descriptive name" />
           <select className="dropdown" style={{ marginTop: 8 }} value={type} onChange={(e) => setType(e.target.value as 'sdk' | 'inspector')}>
             <option value="sdk">SDK (@modelcontextprotocol/sdk)</option>
-            <option value="inspector">Inspector oficial</option>
+            <option value="inspector">Official Inspector</option>
           </select>
-          <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Comando (ej. npx)" />
-          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Descripción corta (opcional)" />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. npx)" />
+          <input className="cmd-input" style={{ marginTop: 8 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Short description (optional)" />
           <div className="cmd-preview" style={{ marginTop: 8 }}>
             <span className="cmd-preview-label">Preview</span>
             <code className="cmd-preview-code">{basicPreview || '—'}</code>
@@ -252,16 +252,16 @@ function ClientStep(props: ClientStepProps): React.ReactElement {
             style={{ marginTop: 8 }}
           >
             <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
-            <span>⚙ Avanzado</span>
+            <span>⚙ Advanced</span>
           </button>
           <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
             <div className="form-section-advanced-inner">
-              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (uno por línea)'} rows={4} />
+              <textarea className="cmd-input args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={'Args (one per line)'} rows={4} />
             </div>
           </div>
           <div className="crud-row" style={{ marginTop: 8 }}>
-            <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Guardar</button>
-            <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancelar</button>
+            <button className="btn primary small" onClick={save} disabled={!name.trim() || !command.trim()}>✓ Save</button>
+            <button className="btn small" onClick={() => setShowAddForm(false)}>✕ Cancel</button>
           </div>
         </div>
       )}

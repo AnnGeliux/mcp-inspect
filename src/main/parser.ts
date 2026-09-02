@@ -1,9 +1,9 @@
 /**
- * Parser NDJSON para mensajes JSON-RPC 2.0.
- * Maneja líneas parciales (acumulando buffer) y emite un mensaje parseado
- * por cada línea completa terminada en '\n'.
+ * NDJSON parser for JSON-RPC 2.0 messages.
+ * Handles partial lines (accumulating a buffer) and emits one parsed
+ * message per complete line terminated in '\n'.
  *
- * Spec MCP STDIO: "Messages are delimited by newlines, and MUST NOT contain
+ * MCP STDIO spec: "Messages are delimited by newlines, and MUST NOT contain
  * embedded newlines." (research/transports_summary.md, transports.txt L61-63).
  */
 
@@ -13,8 +13,8 @@ export class NdjsonParser {
   private buffer = '';
 
   /**
-   * Alimenta bytes crudos (string) al parser.
-   * Devuelve 0 o más mensajes completos extraídos del buffer.
+   * Feeds raw bytes (string) into the parser.
+   * Returns 0 or more complete messages extracted from the buffer.
    */
   feed(chunk: string): JsonRpcMessage[] {
     this.buffer += chunk;
@@ -30,7 +30,7 @@ export class NdjsonParser {
     return out;
   }
 
-  /** Flush final: procesa cualquier línea residual sin newline final. */
+  /** Final flush: processes any residual line without a trailing newline. */
   flush(): JsonRpcMessage[] {
     if (!this.buffer) return [];
     const line = this.buffer.replace(/\r$/, '');
@@ -39,21 +39,21 @@ export class NdjsonParser {
     return msg ? [msg] : [];
   }
 
-  /** Bytes sin parsear aún (línea parcial). Útil para diagnóstico. */
+  /** Bytes not yet parsed (partial line). Useful for diagnostics. */
   get pending(): string {
     return this.buffer;
   }
 }
 
-/** Intenta parsear una línea como JSON-RPC. Devuelve null si falla. */
+/** Tries to parse a line as JSON-RPC. Returns null on failure. */
 export function parseLine(line: string): JsonRpcMessage | null {
   const trimmed = line.trim();
-  if (!trimmed) return null; // línea vacía (ignorada por spec)
+  if (!trimmed) return null; // empty line (ignored per spec)
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return null; // JSON inválido, ignorar (no inventar error)
+    return null; // invalid JSON, ignore (don't invent an error)
   }
   if (!isObject(parsed)) return null;
   if (parsed.jsonrpc !== '2.0') return null;

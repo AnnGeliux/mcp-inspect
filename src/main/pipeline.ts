@@ -1,46 +1,46 @@
 /**
- * MITM Pipeline — el corazón de la interceptación (Phase 6).
+ * MITM Pipeline — the heart of interception (Phase 6).
  *
- * Cada mensaje que cruza el proxy pasa por aquí ANTES de entregarse:
- *   c2s: writeClientMessage() → pipeline.process('c2s', msg) → stdin del server
- *   s2c: stdout del server → pipeline.process('s2c', msg) → cliente SDK
+ * Every message crossing the proxy goes through here BEFORE delivery:
+ *   c2s: writeClientMessage() → pipeline.process('c2s', msg) → server stdin
+ *   s2c: server stdout → pipeline.process('s2c', msg) → SDK client
  *
- * Sin reglas activas, el mensaje fluye tal cual (comportamiento read-only
- * de siempre — la promesa se resuelve inmediatamente).
+ * With no active rules, the message flows through unchanged (the usual
+ * read-only behavior — the promise resolves immediately).
  *
- * Si una regla coincide, el mensaje queda RETENIDO: la promesa de process()
- * no se resuelve hasta que el usuario lo decide desde la UI:
- *   send          → entrega el original sin cambios
- *   send-modified → entrega la versión editada (params/result/error alterados)
- *   drop          → lo descarta (nunca llega a su destino)
- *   respond       → s2c only: descarta el original y entrega una respuesta
- *                   sintética al cliente (probar cómo reacciona el LLM sin
- *                   tocar el server). En c2s equivale a drop.
+ * If a rule matches, the message is HELD: the process() promise doesn't
+ * resolve until the user decides from the UI:
+ *   send          → deliver the original unchanged
+ *   send-modified → deliver the edited version (params/result/error altered)
+ *   drop          → discard it (never reaches its destination)
+ *   respond       → s2c only: discard the original and deliver a synthetic
+ *                   response to the client (test how the LLM reacts without
+ *                   touching the server). In c2s it equals drop.
  *
- * SERIALIZACIÓN: la promesa pendiente serializa naturalmente cada dirección
- * — los mensajes que llegan detrás de un hold quedan esperando en la cadena
- * de promesas (nunca se reordenan). c2s y s2c fluyen independientes.
+ * SERIALIZATION: the pending promise naturally serializes each direction
+ * — messages arriving behind a hold wait in the promise chain (they are
+ * never reordered). c2s and s2c flow independently.
  *
- * CORRELACIÓN: las respuestas JSON-RPC NO llevan `method` (pitfall #1 del
- * skill mcp-protocol-tooling) — se correlacionan con su request SOLO por
- * `id`. El pipeline observa cada request y mantiene mapas id→{method, ts}
- * por dirección, que alimentan (a) reglas por método en s2c y (b) el cálculo
- * de latencia request→response en el proxy.
+ * CORRELATION: JSON-RPC responses do NOT carry `method` (pitfall #1 from
+ * the mcp-protocol-tooling skill) — they are correlated with their request
+ * ONLY by `id`. The pipeline observes every request and keeps id→{method, ts}
+ * maps per direction, which feed (a) method-based rules on s2c and (b) the
+ * request→response latency calculation in the proxy.
  */
 
 import { EventEmitter } from 'events';
 import { InterceptRule, HeldMessage, JsonRpcMessage, JsonRpcResponse, JsonRpcError, HoldResolution, SimulationConfig } from '../shared/types';
 
 export interface PipelineEvents {
-  /** Un mensaje fue retenido por un breakpoint. */
+  /** A message was held by a breakpoint. */
   held: (held: HeldMessage) => void;
-  /** Un hold fue resuelto (o liberado). */
+  /** A hold was resolved (or released). */
   released: (id: string) => void;
-  /** Reglas cambiaron (add/remove/toggle/intercept-all/clear). */
+  /** Rules changed (add/remove/toggle/intercept-all/clear). */
   rulesChanged: () => void;
-  /** La pausa global cambió (congelar tráfico sin matar el subprocess). */
+  /** The global pause changed (freeze traffic without killing the subprocess). */
   pausedChanged: (paused: boolean) => void;
-  /** La cola de pausa cambió (mensajes encolados o liberados). */
+  /** The pause queue changed (messages enqueued or released). */
   queueChanged: () => void;
 }
 
@@ -49,34 +49,34 @@ export declare interface MITMPipeline {
   emit<E extends keyof PipelineEvents>(event: E, ...args: Parameters<PipelineEvents[E]>): boolean;
 }
 
-/** Resultado del pipeline tras resolver: qué entregar y si fue alterado. */
+/** Pipeline result after resolving: what to deliver and whether it was altered. */
 export interface ProcessResult {
-  /** Mensaje final a entregar al destino (null = descartado). */
+  /** Final message to deliver to the destination (null = discarded). */
   msg: JsonRpcMessage | null;
-  /** true si fue retenido por un breakpoint. */
+  /** true if it was held by a breakpoint. */
   held: boolean;
-  /** true si el mensaje entregado difiere del original (editado o respondido). */
+  /** true if the delivered message differs from the original (edited or responded). */
   modified: boolean;
-  /** ms que estuvo retenido. */
+  /** ms it was held. */
   heldMs: number;
   /**
-   * Respuesta sintética para el CLIENTE (solo simulaciones c2s fault/mock):
-   * el mensaje original se descarta del flujo hacia el server y esta
-   * respuesta se entrega al cliente en su lugar. El proxy la emite como
-   * deliveredS2c + entry.
+   * Synthetic response for the CLIENT (c2s fault/mock simulations only):
+   * the original message is discarded from the flow towards the server and
+   * this response is delivered to the client in its place. The proxy emits
+   * it as deliveredS2c + entry.
    */
   syntheticResponse?: JsonRpcMessage;
-  /** Simulación aplicada (para el badge del entry en el log). */
+  /** Applied simulation (for the entry badge in the log). */
   simulated?: 'fault' | 'mock' | 'throttle';
 }
 
-/** Info de un request observado, para correlacionar su respuesta. */
+/** Info about an observed request, to correlate its response. */
 interface RequestInfo {
   method: string;
   ts: number;
 }
 
-/** Mensaje en cola de pausa, esperando el resume (FIFO). */
+/** Message in the pause queue, waiting for resume (FIFO). */
 interface PausedItem {
   msg: JsonRpcMessage;
   arrivedAt: number;
@@ -85,26 +85,26 @@ interface PausedItem {
 
 type Dir = 'c2s' | 's2c';
 
-/** Límite de requests correlacionados por dirección (evita crecimiento infinito). */
+/** Limit of correlated requests per direction (prevents unbounded growth). */
 const MAX_TRACKED_REQUESTS = 1000;
 
 export class MITMPipeline extends EventEmitter {
   private rules = new Map<string, InterceptRule>();
-  /** Holds activos, por dirección. */
+  /** Active holds, per direction. */
   private heldByDir: Record<Dir, HeldMessage[]> = { c2s: [], s2c: [] };
-  /** Resolvers pendientes por hold id — resolver la promesa = entregar. */
+  /** Pending resolvers per hold id — resolving the promise = delivering. */
   private resolvers = new Map<string, (r: ProcessResult) => void>();
-  /** Requests observados por dirección: id → {method, ts} (correlación). */
+  /** Observed requests per direction: id → {method, ts} (correlation). */
   private requests: Record<Dir, Map<string | number, RequestInfo>> = { c2s: new Map(), s2c: new Map() };
   private seq = 0;
-  /** Intercept-all por dirección: si true, TODO se retiene. */
+  /** Intercept-all per direction: if true, EVERYTHING is held. */
   private interceptAll: Record<Dir, boolean> = { c2s: false, s2c: false };
-  /** Pausa global: congela TODO el tráfico (sin matar el subprocess). */
+  /** Global pause: freezes ALL traffic (without killing the subprocess). */
   private _paused = false;
-  /** Cola de pausa por dirección — se libera en FIFO al resume. */
+  /** Pause queue per direction — released FIFO on resume. */
   private pausedQueue: Record<Dir, PausedItem[]> = { c2s: [], s2c: [] };
 
-  // ——— Reglas ————————————————————————————————————————————————————
+  // ——— Rules —————————————————————————————————————————————————————
 
   addRule(dir: Dir, method: string, simulation?: SimulationConfig): InterceptRule {
     const id = `rule-${++this.seq}`;
@@ -114,7 +114,7 @@ export class MITMPipeline extends EventEmitter {
     return rule;
   }
 
-  /** Asigna/cambia la simulación de una regla existente. */
+  /** Assigns/changes the simulation of an existing rule. */
   setRuleSimulation(id: string, simulation: SimulationConfig | null): void {
     const r = this.rules.get(id);
     if (r) {
@@ -150,22 +150,22 @@ export class MITMPipeline extends EventEmitter {
     return Array.from(this.rules.values());
   }
 
-  /** Holds activos (copia), en orden de llegada. */
+  /** Active holds (copy), in arrival order. */
   listHeld(): HeldMessage[] {
     return [...this.heldByDir.c2s, ...this.heldByDir.s2c];
   }
 
-  /** true si hay al menos un mensaje retenido esperando decisión. */
+  /** true if there is at least one held message awaiting a decision. */
   get hasHeld(): boolean {
     return this.heldByDir.c2s.length > 0 || this.heldByDir.s2c.length > 0;
   }
 
-  /** Elimina todas las reglas, libera holds y cola de pausa, y quita la pausa. */
+  /** Removes all rules, releases holds and the pause queue, and lifts the pause. */
   async flushAll(): Promise<void> {
     for (const h of this.listHeld()) {
       this.resolveHold(h.id, { action: 'send' });
     }
-    // La cola de pausa también se libera (entrega originales, sin re-procesar).
+    // The pause queue is released too (deliver originals, without re-processing).
     const queued = [...this.pausedQueue.c2s.splice(0), ...this.pausedQueue.s2c.splice(0)];
     for (const item of queued) {
       item.resolve({ msg: item.msg, held: false, modified: false, heldMs: 0 });
@@ -180,25 +180,25 @@ export class MITMPipeline extends EventEmitter {
     this.emit('rulesChanged');
   }
 
-  /** Limpia los mapas de correlación (al iniciar una sesión nueva). */
+  /** Clears the correlation maps (when starting a new session). */
   clearCorrelation(): void {
     this.requests.c2s.clear();
     this.requests.s2c.clear();
   }
 
-  // ——— Pausa global (congelar tráfico sin matar el subprocess) ———
+  // ——— Global pause (freeze traffic without killing the subprocess) ———
 
-  /** ¿Está pausado? Los mensajes nuevos se encolan en vez de fluir. */
+  /** Is it paused? New messages are enqueued instead of flowing. */
   get paused(): boolean {
     return this._paused;
   }
 
-  /** Mensajes encolados por la pausa, por dirección. */
+  /** Messages enqueued by the pause, per direction. */
   queueLengths(): { c2s: number; s2c: number } {
     return { c2s: this.pausedQueue.c2s.length, s2c: this.pausedQueue.s2c.length };
   }
 
-  /** Congela TODO el tráfico: cada mensaje nuevo se encola (FIFO por dirección). */
+  /** Freezes ALL traffic: every new message is enqueued (FIFO per direction). */
   pause(): void {
     if (this._paused) return;
     this._paused = true;
@@ -206,11 +206,11 @@ export class MITMPipeline extends EventEmitter {
   }
 
   /**
-   * Reanuda el tráfico: libera la cola FIFO por dirección. Cada mensaje
-   * encolado RE-ENTRA al pipeline (con su arrivedAt original) — si coincide
-   * con una regla/breakpoint se retiene para inspección; si no, fluye tal
-   * cual. c2s se drena primero para que los requests queden correlacionados
-   * antes que sus responses.
+   * Resumes traffic: drains the FIFO queue per direction. Every enqueued
+   * message RE-ENTERS the pipeline (with its original arrivedAt) — if it
+   * matches a rule/breakpoint it is held for inspection; otherwise it
+   * flows through unchanged. c2s drains first so requests are correlated
+   * before their responses.
    */
   resume(): void {
     if (!this._paused) return;
@@ -228,9 +228,9 @@ export class MITMPipeline extends EventEmitter {
   }
 
   /**
-   * Reinicia el estado de pausa para una sesión nueva: la cola vieja se
-   * descarta (resolve con drop — el server anterior ya no existe) y el flag
-   * queda en false.
+   * Resets the pause state for a new session: the old queue is discarded
+   * (resolve with drop — the previous server no longer exists) and the
+   * flag is left at false.
    */
   resetPause(): void {
     const queued = [...this.pausedQueue.c2s.splice(0), ...this.pausedQueue.s2c.splice(0)];
@@ -243,14 +243,14 @@ export class MITMPipeline extends EventEmitter {
     if (wasPaused) this.emit('pausedChanged', false);
   }
 
-  // ——— Correlación id→{method, ts} ————————————————————————————
+  // ——— Correlation id→{method, ts} ——————————————————————————
 
-  /** Registra un request observado (para reglas por método y latencia). */
+  /** Records an observed request (for method-based rules and latency). */
   private observeRequest(dir: Dir, msg: JsonRpcMessage, arrivedAt: number): void {
     if ('method' in msg && 'id' in msg && msg.id != null) {
       const map = this.requests[dir];
       if (map.size >= MAX_TRACKED_REQUESTS) {
-        // FIFO: evicta el más viejo (primera key insertada)
+        // FIFO: evict the oldest one (first inserted key)
         const oldest = map.keys().next().value;
         if (oldest !== undefined) map.delete(oldest);
       }
@@ -258,7 +258,7 @@ export class MITMPipeline extends EventEmitter {
     }
   }
 
-  /** Método efectivo de un mensaje: propio (requests/notif) o correlacionado (responses). */
+  /** Effective method of a message: its own (requests/notifications) or correlated (responses). */
   methodOf(dir: Dir, msg: JsonRpcMessage): string {
     if ('method' in msg) return msg.method;
     if ('id' in msg && msg.id != null) {
@@ -269,11 +269,11 @@ export class MITMPipeline extends EventEmitter {
   }
 
   /**
-   * Correlaciona una respuesta con su request (si existe).
-   * Devuelve {requestMethod, latencyMs} o null. Consume la entrada del mapa.
+   * Correlates a response with its request (if it exists).
+   * Returns {requestMethod, latencyMs} or null. Consumes the map entry.
    */
   correlateResponse(dir: Dir, msg: JsonRpcMessage, now = Date.now()): { requestMethod: string; latencyMs: number } | null {
-    if ('method' in msg) return null; // request/notification — no correlaciona
+    if ('method' in msg) return null; // request/notification — no correlation
     if (!('id' in msg) || msg.id == null) return null;
     const origin: Dir = dir === 'c2s' ? 's2c' : 'c2s';
     const info = this.requests[origin].get(msg.id);
@@ -282,20 +282,20 @@ export class MITMPipeline extends EventEmitter {
     return { requestMethod: info.method, latencyMs: Math.max(0, now - info.ts) };
   }
 
-  // ——— Procesamiento ————————————————————————————————————————————
+  // ——— Processing ————————————————————————————————————————————
 
   /**
-   * Procesa un mensaje que cruza el proxy. Devuelve una promesa que se
-   * resuelve con la decisión final:
-   *  - Sin reglas: inmediata, mensaje tal cual.
-   *  - Con regla coincidente: la promesa espera hasta que el usuario resuelve
-   *    el hold desde la UI (resolveHold).
+   * Processes a message crossing the proxy. Returns a promise that resolves
+   * with the final decision:
+   *  - No rules: immediate, message unchanged.
+   *  - With a matching rule: the promise waits until the user resolves
+   *    the hold from the UI (resolveHold).
    *
-   * @param arrivedAt ms epoch de llegada al proxy (para latencia/heldAt precisos).
-   * El write al destino lo hace el CALLER (proxy.ts) cuando la promesa resuelve.
+   * @param arrivedAt epoch ms of arrival at the proxy (for precise latency/heldAt).
+   * The write to the destination is done by the CALLER (proxy.ts) when the promise resolves.
    */
   process(dir: Dir, msg: JsonRpcMessage, arrivedAt = Date.now()): Promise<ProcessResult> {
-    // Pausa global: encolar en vez de procesar (el subprocess sigue vivo).
+    // Global pause: enqueue instead of processing (the subprocess stays alive).
     if (this._paused) {
       return new Promise<ProcessResult>((resolve) => {
         this.pausedQueue[dir].push({ msg, arrivedAt, resolve });
@@ -305,7 +305,7 @@ export class MITMPipeline extends EventEmitter {
     return this.processNow(dir, msg, arrivedAt);
   }
 
-  /** Procesamiento real (sin pausa): observado + match de reglas + hold/simulación. */
+  /** Actual processing (no pause): observe + rule match + hold/simulation. */
   private processNow(dir: Dir, msg: JsonRpcMessage, arrivedAt: number): Promise<ProcessResult> {
     this.observeRequest(dir, msg, arrivedAt);
 
@@ -317,7 +317,7 @@ export class MITMPipeline extends EventEmitter {
     const rule = ruleId === '__all__' ? null : this.rules.get(ruleId) ?? null;
     const sim = rule?.simulation;
 
-    // Phase 7 — simulaciones automáticas (fault/mock/throttle), sin hold.
+    // Phase 7 — automatic simulations (fault/mock/throttle), no hold.
     if (sim) {
       if (sim.type === 'throttle') {
         return this.applyThrottle(dir, msg, sim.throttleMs, arrivedAt, ruleId);
@@ -328,7 +328,7 @@ export class MITMPipeline extends EventEmitter {
       if (sim.type === 'mock') {
         return Promise.resolve(this.applyMock(dir, msg, sim, ruleId));
       }
-      // sim.type === 'hold' → cae al hold clásico de abajo.
+      // sim.type === 'hold' → falls through to the classic hold below.
     }
 
     const id = `held-${++this.seq}-${arrivedAt}`;
@@ -349,7 +349,7 @@ export class MITMPipeline extends EventEmitter {
     return p;
   }
 
-  /** Throttle: entrega el original tras `ms` de retraso artificial. */
+  /** Throttle: delivers the original after `ms` of artificial delay. */
   private applyThrottle(
     dir: Dir,
     msg: JsonRpcMessage,
@@ -367,17 +367,17 @@ export class MITMPipeline extends EventEmitter {
           heldMs: Math.max(0, Date.now() - arrivedAt),
           simulated: 'throttle',
         });
-        void ruleId; // matchRule ya decidió — solo informativo aquí.
+        void ruleId; // matchRule already decided — informational only here.
       }, delay);
     });
   }
 
   /**
-   * Fault injection: el mensaje se descarta y se genera una respuesta de
-   * error JSON-RPC para el CLIENTE con el id del request original.
-   * - c2s (request del cliente): el server nunca lo ve; el cliente recibe el error.
-   * - s2c (response real del server): se reemplaza por el error.
-   * - Notifications (sin id): no hay a quién responder → drop puro.
+   * Fault injection: the message is discarded and a JSON-RPC error
+   * response is generated for the CLIENT with the original request's id.
+   * - c2s (client request): the server never sees it; the client gets the error.
+   * - s2c (real server response): replaced with the error.
+   * - Notifications (no id): nobody to answer → pure drop.
    */
   private applyFault(
     dir: Dir,
@@ -389,21 +389,21 @@ export class MITMPipeline extends EventEmitter {
       error: { code: sim.faultCode ?? -32603, message: sim.faultMessage ?? 'Injected fault (mcp-inspect)' },
     });
     if (response === null) {
-      // Notification o mensaje sin id: nada que responder — drop puro.
+      // Notification or message without id: nothing to answer — pure drop.
       return { msg: null, held: false, modified: false, heldMs: 0, simulated: 'fault' };
     }
     if (dir === 'c2s') {
-      // El request no llega al server; la respuesta sintética va al cliente.
+      // The request never reaches the server; the synthetic response goes to the client.
       return { msg: null, held: false, modified: true, heldMs: 0, syntheticResponse: response, simulated: 'fault' };
     }
-    // s2c: la respuesta real se reemplaza por el error hacia el cliente.
+    // s2c: the real response is replaced with the error towards the client.
     return { msg: response, held: false, modified: true, heldMs: 0, simulated: 'fault' };
   }
 
   /**
-   * Auto-mock: el mensaje se descarta y se entrega mockResult/mockError al
-   * cliente sin golpear el destino real. Igual que fault pero con payload
-   * definido por el usuario.
+   * Auto-mock: the message is discarded and mockResult/mockError is
+   * delivered to the client without hitting the real destination.
+   * Same as fault but with a user-defined payload.
    */
   private applyMock(
     dir: Dir,
@@ -425,31 +425,31 @@ export class MITMPipeline extends EventEmitter {
   }
 
   /**
-   * Construye una respuesta JSON-RPC sintética para el mensaje dado.
-   * Respondable = cualquier mensaje con `id` no null:
-   * - requests del cliente (c2s) → el cliente espera respuesta con ese id.
-   * - responses del server (s2c) → se reemplazan conservando su id.
-   * Los requests iniciados por el SERVER (s2c, ej. sampling/createMessage)
-   * NO son respondables — reemplazarlos con una response confundiría al
-   * cliente → drop puro. Notifications (sin id) → drop puro.
+   * Builds a synthetic JSON-RPC response for the given message.
+   * Respondable = any message with a non-null `id`:
+   * - client requests (c2s) → the client expects a response with that id.
+   * - server responses (s2c) → replaced, keeping their id.
+   * Requests initiated BY the SERVER (s2c, e.g. sampling/createMessage)
+   * are NOT respondable — replacing them with a response would confuse
+   * the client → pure drop. Notifications (no id) → pure drop.
    */
   private buildSyntheticResponse(
     dir: Dir,
     msg: JsonRpcMessage,
     payload: { result?: unknown; error?: JsonRpcError },
   ): JsonRpcMessage | null {
-    if (!('id' in msg) || msg.id == null) return null; // notification / id nulo
-    if (dir === 's2c' && 'method' in msg) return null; // request iniciado por el server
+    if (!('id' in msg) || msg.id == null) return null; // notification / null id
+    if (dir === 's2c' && 'method' in msg) return null; // request initiated by the server
     const response: JsonRpcResponse = { jsonrpc: '2.0', id: msg.id };
     if (payload.error) response.error = payload.error;
     else response.result = payload.result;
     return response;
   }
 
-  /** ¿Coincide alguna regla (activa) con este mensaje? ruleId o null. */
+  /** Does any (active) rule match this message? ruleId or null. */
   private matchRule(dir: Dir, msg: JsonRpcMessage): string | null {
     const method = this.methodOf(dir, msg);
-    // intercept-all: coincide con todo (ruleId implícito)
+    // intercept-all: matches everything (implicit ruleId).
     if (this.interceptAll[dir]) return '__all__';
     for (const r of this.rules.values()) {
       if (!r.enabled) continue;
@@ -460,14 +460,14 @@ export class MITMPipeline extends EventEmitter {
   }
 
   /**
-   * Resuelve un hold con la decisión del usuario.
+   * Resolves a hold with the user's decision.
    *
-   * ENTREGA FIFO: solo el PRIMER hold de cada dirección se entrega al
-   * resolver. Si el hold resuelto no es el primero, la decisión queda
-   * registrada (pendingResolution) y se aplica automáticamente cuando los
-   * holds anteriores se resuelvan — así los mensajes nunca se reordenan.
+   * FIFO DELIVERY: only the FIRST hold of each direction is delivered when
+   * resolved. If the resolved hold is not the first, the decision is
+   * recorded (pendingResolution) and applied automatically when the
+   * earlier holds resolve — this way messages are never reordered.
    *
-   * Ids desconocidos → false (hold ya resuelto).
+   * Unknown ids → false (hold already resolved).
    */
   resolveHold(id: string, resolution: HoldResolution): boolean {
     let dir: Dir;
@@ -482,19 +482,19 @@ export class MITMPipeline extends EventEmitter {
     const held = this.heldByDir[dir][idx]!;
 
     if (idx !== 0) {
-      // No es el head: registrar decisión, entregar cuando llegue su turno.
+      // Not the head: record the decision, deliver when its turn comes.
       held.pendingResolution = resolution;
       this.emit('rulesChanged');
       return true;
     }
 
-    // Es el head: aplicar y resolver; luego cascada de decisiones pendientes.
+    // It is the head: apply and resolve; then cascade of pending decisions.
     this.applyAndRelease(held, resolution);
     this.cascadePending(dir);
     return true;
   }
 
-  /** Aplica la decisión al hold head: saca de la lista, resuelve la promesa. */
+  /** Applies the decision to the head hold: removes from the list, resolves the promise. */
   private applyAndRelease(held: HeldMessage, resolution: HoldResolution): void {
     const dir = held.dir;
     const list = this.heldByDir[dir];
@@ -516,8 +516,8 @@ export class MITMPipeline extends EventEmitter {
         finalMsg = null;
         break;
       case 'respond':
-        // s2c: entregamos respuesta sintética al cliente en vez del original.
-        // c2s: "responder" hacia el server no aplica → drop.
+        // s2c: we deliver a synthetic response to the client instead of the original.
+        // c2s: "respond" towards the server doesn't apply → drop.
         finalMsg = dir === 's2c' ? resolution.msg : null;
         modified = dir === 's2c';
         break;
@@ -532,7 +532,7 @@ export class MITMPipeline extends EventEmitter {
     this.emit('released', held.id);
   }
 
-  /** Tras liberar el head, aplica en cascada las decisiones ya registradas. */
+  /** After releasing the head, cascades the already-recorded decisions. */
   private cascadePending(dir: Dir): void {
     const list = this.heldByDir[dir];
     while (list.length > 0 && list[0]!.pendingResolution !== undefined) {

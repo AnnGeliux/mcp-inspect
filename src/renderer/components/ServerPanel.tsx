@@ -14,16 +14,15 @@ interface Props {
   onDelete: (id: string) => void;
   running: boolean;
   onStart: () => void;
-  onStop: () => void;
-  /** Reiniciar el subprocess con la misma config (Phase 5). */
+  /** Restart the subprocess with the same config (Phase 5). */
   onRestart: () => void;
-  /** Matar el subprocess inmediatamente, SIGKILL (Phase 5). */
+  /** Kill the subprocess immediately, SIGKILL (Phase 5). */
   onKill: () => void;
-  /** Pausa MITM: congelar el tráfico sin matar el subprocess. */
+  /** MITM pause: freeze traffic without killing the subprocess. */
   paused: boolean;
-  /** Congelar TODO el tráfico (el server sigue vivo). */
+  /** Freeze ALL traffic (the server stays alive). */
   onPause: () => void;
-  /** Reanudar el tráfico congelado (libera la cola FIFO). */
+  /** Resume frozen traffic (releases the FIFO queue). */
   onResume: () => void;
 }
 
@@ -41,7 +40,6 @@ export default function ServerPanel(props: Props): React.ReactElement {
     onDelete,
     running,
     onStart,
-    onStop,
     onRestart,
     onKill,
     paused,
@@ -123,12 +121,22 @@ export default function ServerPanel(props: Props): React.ReactElement {
         <span className="icon">📡</span>
         <span>MCP Server</span>
         <span className="role-tag">target</span>
+        {running && (
+          <button
+            className="header-btn server"
+            onClick={onRestart}
+            disabled={!selected}
+            title="Reset the server: restart the subprocess with the same config (the logged session is preserved)"
+          >
+            ↻ Reset
+          </button>
+        )}
       </div>
       <div className="panel-body">
         {/* Card grid — visual selectors */}
         {editMode === 'none' && (
           <div className="card-grid-section">
-            <div className="card-grid-label">Servers disponibles</div>
+            <div className="card-grid-label">Available servers</div>
             <div className="card-grid">
               {servers.map((s) => (
                 <ServerCard
@@ -142,9 +150,9 @@ export default function ServerPanel(props: Props): React.ReactElement {
                   onDelete={() => handleDelete(s.id)}
                 />
               ))}
-              <button className="card card-add" onClick={startAdd} disabled={running} title="Agregar server custom">
+              <button className="card card-add" onClick={startAdd} disabled={running} title="Add a custom server">
                 <span className="card-icon">＋</span>
-                <span className="card-name">Agregar</span>
+                <span className="card-name">Add</span>
               </button>
             </div>
           </div>
@@ -153,13 +161,13 @@ export default function ServerPanel(props: Props): React.ReactElement {
         {/* Add / Edit form with collapsible sections */}
         {editMode !== 'none' && (
           <div className="endpoint-card edit-form slide-in">
-            <div className="form-label">{editMode === 'add' ? 'Nuevo server' : 'Editar server'}</div>
+            <div className="form-label">{editMode === 'add' ? 'New server' : 'Edit server'}</div>
 
             {/* ——— Basic section (always visible) ——— */}
             <div className="form-section-basic">
-              <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre descriptivo" disabled={running} />
-              <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Comando (ej. npx)" disabled={running} />
-              <input className="cmd-input" style={{ marginTop: 8 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Descripción corta (opcional)" disabled={running} />
+              <input className="cmd-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Descriptive name" disabled={running} />
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editCommand} onChange={(e) => setEditCommand(e.target.value)} placeholder="Command (e.g. npx)" disabled={running} />
+              <input className="cmd-input" style={{ marginTop: 8 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Short description (optional)" disabled={running} />
 
               {/* Basic preview */}
               <div className="cmd-preview" style={{ marginTop: 8 }}>
@@ -175,19 +183,19 @@ export default function ServerPanel(props: Props): React.ReactElement {
               type="button"
             >
               <span className="advanced-toggle-icon">{showAdvanced ? '▾' : '▸'}</span>
-              <span>⚙ Avanzado</span>
+              <span>⚙ Advanced</span>
             </button>
 
             {/* ——— Advanced section (collapsible) ——— */}
             <div className={`form-section-advanced ${showAdvanced ? 'expanded' : 'collapsed'}`}>
               <div className="form-section-advanced-inner">
                 <div className="form-field">
-                  <label className="form-field-label">Args (uno por línea)</label>
+                  <label className="form-field-label">Args (one per line)</label>
                   <textarea className="cmd-input args" value={editArgs} onChange={(e) => setEditArgs(e.target.value)} placeholder={'-y\n@modelcontextprotocol/everything-server'} disabled={running} rows={4} />
                 </div>
 
                 <div className="form-field" style={{ marginTop: 8 }}>
-                  <label className="form-field-label">Variables de entorno (KEY=VALUE, una por línea)</label>
+                  <label className="form-field-label">Environment variables (KEY=VALUE, one per line)</label>
                   <textarea className="cmd-input args" value={editEnv} onChange={(e) => setEditEnv(e.target.value)} placeholder={'ELECTRON_RUN_AS_NODE=1\nNODE_ENV=development'} disabled={running} rows={3} />
                 </div>
 
@@ -197,12 +205,12 @@ export default function ServerPanel(props: Props): React.ReactElement {
                     checked={editConnectClient}
                     onChange={(e) => setEditConnectClient(e.target.checked)}
                   />
-                  <span>Conectar cliente MCP automáticamente</span>
+                  <span>Connect the MCP client automatically</span>
                 </label>
 
                 {/* Full preview (with env + args) */}
                 <div className="cmd-preview" style={{ marginTop: 8 }}>
-                  <span className="cmd-preview-label">Preview completo</span>
+                  <span className="cmd-preview-label">Full preview</span>
                   <code className="cmd-preview-code">{fullPreview || '—'}</code>
                 </div>
               </div>
@@ -210,17 +218,17 @@ export default function ServerPanel(props: Props): React.ReactElement {
 
             {/* ——— Action buttons ——— */}
             <div className="crud-row" style={{ marginTop: 8 }}>
-              <button className="btn primary small" onClick={saveEdit} disabled={!editName.trim() || !editCommand.trim()}>✓ Guardar</button>
-              <button className="btn small" onClick={cancelEdit}>✕ Cancelar</button>
+              <button className="btn primary small" onClick={saveEdit} disabled={!editName.trim() || !editCommand.trim()}>✓ Save</button>
+              <button className="btn small" onClick={cancelEdit}>✕ Cancel</button>
             </div>
           </div>
         )}
 
         {/* Config display — property table style (DevTools > Properties) */}
         {editMode === 'none' && selected && (
-          <div className="prop-table" role="table" aria-label="Configuración del server seleccionado">
+          <div className="prop-table" role="table" aria-label="Selected server configuration">
             <div className="prop-row" role="row">
-              <span className="prop-label" role="cell">Comando</span>
+              <span className="prop-label" role="cell">Command</span>
               <span className="prop-value" role="cell">
                 <input className="prop-input" value={config.command} onChange={(e) => update({ command: e.target.value })} placeholder="npx" disabled={running} spellCheck={false} />
               </span>
@@ -254,25 +262,25 @@ export default function ServerPanel(props: Props): React.ReactElement {
         {editMode === 'none' && !selected && (
           <div className="empty-state">
             <span className="empty-state-icon">📡</span>
-            <span className="empty-state-text">Selecciona un server para empezar</span>
+            <span className="empty-state-text">Select a server to get started</span>
           </div>
         )}
 
-        {/* Start/Pause/Restart/Kill — gestor de procesos (Phase 5, feature 1c) */}
+        {/* Start/Pause/Kill — process manager (Phase 5, feature 1c).
+            Server reset (↻) lives in the panel-header; Stop was removed:
+            Start already stops the previous session and ☠ Kill remains as the hard stop. */}
         {editMode === 'none' && (
           <div className="action-row" style={{ marginTop: 12 }}>
             {!running ? (
-              <button className="btn primary" onClick={onStart} disabled={!selected} title="Iniciar el server MCP">▶ Start</button>
+              <button className="btn primary" onClick={onStart} disabled={!selected} title="Start the MCP server">▶ Start</button>
             ) : (
               <>
-                <button className="btn" onClick={onRestart} title="Reiniciar el subprocess (mantiene la sesión loggeada)">↻ Reiniciar</button>
                 {paused ? (
-                  <button className="btn primary" onClick={onResume} title="Reanudar el tráfico congelado — libera la cola en orden (FIFO)">▶ Resume</button>
+                  <button className="btn primary" onClick={onResume} title="Resume frozen traffic — releases the queue in order (FIFO)">▶ Resume</button>
                 ) : (
-                  <button className="btn warning" onClick={onPause} title="Pausar el tráfico (MITM) — el server sigue vivo, los mensajes se encolan">⏸ Pausar</button>
+                  <button className="btn warning" onClick={onPause} title="Pause traffic (MITM) — the server stays alive, messages are queued">⏸ Pause</button>
                 )}
-                <button className="btn danger" onClick={onStop} title="Detener el server (SIGTERM → SIGKILL)">■ Stop</button>
-                <button className="btn danger" onClick={onKill} title="Matar inmediatamente (SIGKILL, sin gracia)">☠ Matar</button>
+                <button className="btn danger" onClick={onKill} title="Kill immediately (SIGKILL, no grace period)">☠ Kill</button>
               </>
             )}
           </div>

@@ -96,7 +96,7 @@ input, textarea, select { font-family: inherit; }
 .pill.danger { color: var(--error); border-color: rgba(248, 81, 73, 0.4); background: var(--error-soft); }
 
 /* ═══════════════════════════════════════════════════════════════
-   Interceptación MITM (Phase 6)
+   MITM Interception (Phase 6)
    ═══════════════════════════════════════════════════════════════ */
 
 .intercept-bar {
@@ -211,6 +211,33 @@ input, textarea, select { font-family: inherit; }
   gap: var(--sp-2); font-size: 13px; font-weight: 600;
 }
 .panel-body { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-4); }
+
+/* Compact button in the panel-header (Reset server/client).
+   Tinted backgrounds by origin — same language as the chat view:
+   purple = server (left bubbles), blue = client (right bubbles). */
+.header-btn {
+  margin-left: auto; padding: 2px 10px; font-size: 11px; font-weight: 600;
+  border-radius: var(--r-sm); cursor: pointer;
+  border: 1px solid transparent; color: var(--text);
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.header-btn.server {
+  background: rgba(188, 140, 255, 0.13); border-color: rgba(188, 140, 255, 0.28);
+}
+.header-btn.server:hover { background: rgba(188, 140, 255, 0.22); }
+.header-btn.client {
+  background: rgba(88, 166, 255, 0.13); border-color: rgba(88, 166, 255, 0.28);
+}
+.header-btn.client:hover { background: rgba(88, 166, 255, 0.22); }
+.header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* App version next to the brand name in the topbar (semver MAJOR.MINOR.PATCH) */
+.brand-version {
+  font-size: 11px; font-weight: 500; color: var(--text-dim);
+  margin-left: var(--sp-2); padding: 1px 6px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: var(--r-sm); font-family: var(--mono);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Cards (visual selectors)
@@ -514,20 +541,20 @@ input, textarea, select { font-family: inherit; }
 
 .log-list { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
 
-/* ——— Vista chat (reemplaza el timeline): transacciones + burbujas ——— */
-/* El contenedor SOLO hace scroll/padding; el layout flex vive en .chat-content.
-   Así el botón Último (sticky) y los cambios de altura al expandir no
-   desacomodan el layout ni el scroll del chat. */
+/* ——— Chat view (replaces the timeline): transactions + bubbles ——— */
+/* The container ONLY handles scroll/padding; the flex layout lives in .chat-content.
+   This way the Latest button (sticky) and height changes when expanding don't
+   disrupt the chat's layout or scroll. */
 .log-list.chat { padding: var(--sp-3) var(--sp-4) 0; }
 
 .chat-content {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding-bottom: var(--sp-4); /* breathing room al fondo */
+  padding-bottom: var(--sp-4); /* breathing room at the bottom */
 }
 
-/** Bloque de transacción: request↔response correlacionados. */
+/** Transaction block: correlated request↔response. */
 .tx-block {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -550,9 +577,9 @@ input, textarea, select { font-family: inherit; }
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
 }
 
-/** Burbuja: cliente (request) a la derecha, server (response) a la izquierda. */
-/* Diferenciación sólida (tema B): fondos tintados por origen —
-   azul = mensaje del CLIENTE (▲), morado = mensaje del SERVER (●). */
+/** Bubble: client (request) on the right, server (response) on the left. */
+/* Solid differentiation (theme B): tinted backgrounds by origin —
+   blue = CLIENT message (▲), purple = SERVER message (●). */
 .log-entry.bubble {
   border: 1px solid transparent; border-radius: var(--r-lg);
   cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast);
@@ -562,28 +589,28 @@ input, textarea, select { font-family: inherit; }
 .log-entry.bubble.right { align-self: flex-end; border-top-right-radius: var(--r-sm); }
 .log-entry.bubble.left { align-self: flex-start; border-top-left-radius: var(--r-sm); }
 
-/* Fondos tintados por dirección */
+/* Tinted backgrounds by direction */
 .log-entry.bubble.right { background: rgba(88, 166, 255, 0.13); }
 .log-entry.bubble.left { background: rgba(188, 140, 255, 0.13); }
 .log-entry.bubble.right:hover { background: rgba(88, 166, 255, 0.22); }
 .log-entry.bubble.left:hover { background: rgba(188, 140, 255, 0.22); }
 
-/* Borde sutil del mismo tono para reforzar la lectura */
+/* Subtle border of the same tone to reinforce readability */
 .log-entry.bubble.right { border-color: rgba(88, 166, 255, 0.28); }
 .log-entry.bubble.left { border-color: rgba(188, 140, 255, 0.28); }
 
-/* Expandida: ancho completo del bloque (crece hacia abajo, alineada) —
-   el preview nunca desplaza a las demás burbujas de lado. */
+/* Expanded: full width of the block (grows downward, aligned) —
+   the preview never shifts the other bubbles sideways. */
 .log-entry.bubble.expanded {
   background: var(--bg); border-color: var(--border-strong);
   max-width: 100%; align-self: stretch;
 }
 
-/* Icono de origen: ▲ cliente (azul), ● server (morado) */
+/* Origin icon: ▲ client (blue), ● server (purple) */
 .bubble-origin { font-size: 10px; user-select: none; }
 .bubble-origin.right { color: var(--accent); }
 .bubble-origin.left { color: var(--purple); }
-/* En notif/técnicos (grises) el icono acompaña el tono apagado */
+/* In notif/tech (grays) the icon follows the muted tone */
 .log-entry.bubble.notif .bubble-origin, .log-entry.bubble.tech .bubble-origin { color: var(--text-dim); }
 
 .log-entry.bubble.err {
@@ -591,7 +618,7 @@ input, textarea, select { font-family: inherit; }
 }
 .log-entry.bubble.err:hover { background: rgba(248, 81, 73, 0.15); }
 
-/* Notifications y técnicos: burbujas sueltas grises/reducidas */
+/* Notifications and tech: loose gray/reduced bubbles */
 .log-entry.bubble.notif, .log-entry.bubble.tech {
   align-self: flex-start;
   background: transparent;
@@ -603,7 +630,7 @@ input, textarea, select { font-family: inherit; }
 .log-entry.bubble.notif:hover, .log-entry.bubble.tech:hover { color: var(--text); border-color: var(--border-strong); }
 .log-entry.bubble.notif .method .m, .log-entry.bubble.tech .method .m { color: var(--text-dim); font-weight: 500; }
 
-/* Header interno de la burbuja: método + id + badges + status */
+/* Bubble's internal header: method + id + badges + status */
 .bubble-meta {
   display: flex; align-items: center; gap: var(--sp-2);
   flex-wrap: wrap;
@@ -621,7 +648,7 @@ input, textarea, select { font-family: inherit; }
 
 .log-entry.bubble.err .method .m { color: var(--error); }
 
-/* Payload plegado de la burbuja (2 líneas, click expande inline) */
+/* Folded payload of the bubble (2 lines, click expands inline) */
 .bubble-snippet {
   margin-top: 4px; padding: 4px 6px;
   font-size: 11px; line-height: 1.45;
@@ -898,10 +925,10 @@ input, textarea, select { font-family: inherit; }
   white-space: pre-wrap;
   user-select: text;
 }/* ===== Jump-to-latest floating button (log panel) ===== */
-/* Sticky dentro del contenedor de scroll (.log-list.chat). El chip se apoya
-   en una "pista" invisible de altura fija al final del contenido: ocupa todo
-   el ancho (height 0 + overflow visible) para no crear scroll horizontal ni
-   desplazar las burbujas, y el botón visible flota a la derecha. */
+/* Sticky inside the scroll container (.log-list.chat). The chip rests on
+   an invisible "track" of fixed height at the end of the content: it spans
+   the full width (height 0 + overflow visible) so it doesn't create horizontal
+   scroll or shift the bubbles, and the visible button floats to the right. */
 .jump-latest {
   position: sticky;
   bottom: 14px;
