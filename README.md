@@ -1,142 +1,161 @@
 # MCP Inspector
 
-**Visualizador man-in-the-middle (MITM) de conexiones MCP** — intercepta, inspecciona y depura el tráfico JSON-RPC 2.0 entre cualquier servidor MCP y cualquier cliente MCP, en tiempo real.
+**Man-in-the-middle (MITM) visualizer for MCP connections** — intercepts, inspects and debugs JSON-RPC 2.0 traffic between any MCP server and any MCP client, in real time.
+
+![version](https://img.shields.io/badge/version-0.1.0-58a6ff) ![tests](https://img.shields.io/badge/tests-157%20pass-3fb950) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 ---
 
-## 📋 Tabla de contenidos
+## 📋 Table of contents
 
-- [¿Qué hace?](#-qué-hace)
-- [Características](#-características)
+- [What does it do?](#-what-does-it-do)
+- [Features](#-features)
 - [Stack](#-stack)
-- [Estructura del proyecto](#-estructura-del-proyecto)
-- [Instalación](#-instalación)
-- [Uso](#-uso)
-- [Arquitectura](#-arquitectura)
+- [Project structure](#-project-structure)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Architecture](#-architecture)
 - [Testing](#-testing)
-- [Scripts disponibles](#-scripts-disponibles)
+- [Available scripts](#-available-scripts)
 - [Roadmap](#-roadmap)
 
 ---
 
-## 🎯 ¿Qué hace?
+## 🎯 What does it do?
 
-MCP Inspector se interpone entre un servidor MCP y un cliente MCP como un proxy MITM. Captura todo el tráfico JSON-RPC 2.0, lo muestra en una interfaz visual con timestamps, latencia, filtros y búsqueda — y permite pausarlo con breakpoints para editar peticiones y respuestas al vuelo (enviar, modificar, descartar o responder manualmente) sin tocar el server ni el cliente.
+MCP Inspector sits between an MCP server and an MCP client as a MITM proxy. It captures all JSON-RPC 2.0 traffic, renders it in a visual UI with timestamps, latency, filters and search — and lets you pause it with breakpoints to edit requests and responses on the fly (send, modify, drop or manually respond) without touching the server or the client.
 
-**Casos de uso:**
-- Depurar por qué un cliente MCP no recibe respuestas correctas de un servidor
-- Verificar que un servidor MCP implementa correctamente el handshake `initialize → initialized`
-- Inspeccionar qué tools/resources/prompts expone un servidor antes de integrarlo en producción
-- Auditar el tráfico entre tu agente y los MCPs que usa
+**Use cases:**
+- Debug why an MCP client is not receiving correct responses from a server
+- Verify that an MCP server correctly implements the `initialize → initialized` handshake
+- Inspect which tools/resources/prompts a server exposes before integrating it in production
+- Audit the traffic between your agent and the MCPs it uses
 
 ---
 
-## ✨ Características
+## ✨ Features
 
-### Selectores intercambiables
-- **Cards visuales** para elegir servidor y cliente MCP
-- CRUD completo: agregar, editar y eliminar servidores/clientes custom
-- Presets pre-cargados: `everything-server`, `echo` (test), SDK Client, Inspector oficial
-- Persistencia en JSON local (`~/.mcp-inspector/servers.json` y `clients.json`)
+### Interchangeable selectors
+- **Visual cards** for choosing the MCP server and client
+- Full CRUD: add, edit and delete custom servers/clients
+- Preloaded presets: `everything-server`, `echo` (test), SDK Client, official Inspector
+- Local JSON persistence (`~/.mcp-inspector/servers.json` and `clients.json`)
 
-### Panel de tráfico en vivo
-- Log cronológico con timestamps absolutos y relativos ("hace 2s")
-- **Latencia por transacción** — correlación request↔response por ID, delta en ms en cada respuesta
-- **Filtros por tipo:** requests, responses, notifications, errors, all
-- **Filtro por método MCP** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*`…
-- **Visor dual** — tab *Formatted* (árbol coloreado) + tab *Raw* (JSON copiable al portapapeles)
-- **Validación de spec MCP** — cada trama se valida contra los schemas zod del SDK oficial; badge ⚠ en las no conformes
-- **Búsqueda** por método, ID JSON-RPC o contenido del payload
-- **Colapsar/expandir** cada entrada (click para ver payload completo)
-- **Syntax highlighting JSON:** keys (azul), strings (verde), numbers (naranja), booleans (morado), null (gris)
-- **Contadores** por tipo con badges
+### Live traffic — chat view
+- **Transaction blocks** — each request↔response pair rendered as a full-width block: header with method/id/latency, client bubble (right, blue) and server bubble (left, purple)
+- **Loose bubbles** for notifications and technical entries, interleaved chronologically
+- Absolute + relative timestamps ("2s ago")
+- **Latency per transaction** — request↔response correlation by ID, delta in ms on each response
+- **Type filters:** requests, responses, notifications, errors, all
+- **MCP method filter** — `tools/call`, `resources/read`, `prompts/get`, `notifications/*`…
+- **Dual viewer** — *Formatted* tab (colored tree) + *Raw* tab (copyable JSON)
+- **MCP spec validation** — every frame is validated against the official SDK zod schemas; ⚠ badge on non-conforming ones
+- **Search** by method, JSON-RPC ID or payload content
+- **Expand/collapse** each entry inline (click to see full payload)
+- **JSON syntax highlighting:** keys (blue), strings (green), numbers (orange), booleans (purple), null (gray)
+- Per-type counters with badges
 
-### Interceptación MITM (breakpoints)
-- **Breakpoints de petición (→)** — pausa cualquier mensaje cliente→server antes de llegar al server
-- **Breakpoints de respuesta (←)** — pausa cualquier mensaje server→cliente antes de llegar al LLM
-- **Reglas por método** — intercepta solo `tools/call`, `resources/read`, o todo el tráfico
-- **Editor inline** — edita el JSON retenido y decide: Enviar / Enviar editado / Drop / Responder manual
-- **Orden FIFO garantizado** — los mensajes nunca se reordenan aunque resuelvas fuera de orden
-- **Entrega post-pipeline consistente** — el log muestra exactamente lo que se entregó
+### MITM interception (breakpoints)
+- **Request breakpoints (→)** — pause any client→server message before it reaches the server
+- **Response breakpoints (←)** — pause any server→client message before it reaches the LLM
+- **Per-method rules** — intercept only `tools/call`, `resources/read`, or all traffic
+- **Inline editor** — edit the held JSON and decide: Send / Send edited / Drop / Manually respond
+- **Guaranteed FIFO order** — messages are never reordered even if you resolve out of order
+- **Consistent post-pipeline delivery** — the log shows exactly what was delivered
 
-### Gestor de procesos
-- **Reiniciar / Stop / Matar** el subprocess MCP sin reiniciar el cliente (Claude/Cursor/VS Code)
+### Behavior simulation (fault / mock / throttle)
+- **⚡ Fault injection** — auto-respond with standard JSON-RPC errors (`-32601`, `-32602`, `-32603`)
+- **🧪 Auto-mock** — replace a response with a synthetic one, no hold needed
+- **🕒 Throttling** — delay delivery by N ms to test client timeouts
+- Simulations **auto-resolve** without user intervention; only `hold` (breakpoint) retains
+- Synthetic responses for c2s faults/mocks carry the request's ID — the client receives a well-formed answer
 
-### Wizard de configuración
-- Flujo guiado de 2 pasos: elegir server → elegir client → tráfico en vivo
-- Barra de progreso visual
-- Se puede cambiar server/client en cualquier momento
+### Global pause
+- **⏸ Freeze all traffic** without killing the subprocess — messages queue up in a FIFO and re-enter the pipeline on resume
+- Per-direction queue counters in the topbar
+
+### Process manager
+- **▶ Start / ⏸ Pause / ☠ Kill** the MCP subprocess (no restart of the client needed)
+- **↻ Reset buttons in panel headers** — server restart (same config, session preserved) and client reconnect (fresh handshake), tinted to match the chat view colors
+- SDK client requests never expire during long pauses/holds (10-min timeout)
+
+### Setup wizard
+- Guided 2-step flow: choose server → choose client → live traffic
+- Visual progress bar
+- Server/client can be changed at any time
 
 ### Design system
-- Tema dark estilo GitHub DevTools
-- Paleta consistente: accent `#58a6ff`, success `#3fb950`, error `#f85149`, background `#0d1117`
-- Animaciones suaves: hover en cards, fade-in en entradas del log
-- Scrollbars custom dark
-- Tooltips nativos
-- Estados vacíos con mensajes contextuales
+- GitHub DevTools-style dark theme
+- Consistent palette: accent `#58a6ff`, success `#3fb950`, error `#f85149`, background `#0d1117`
+- Smooth animations: card hover, log entry fade-in
+- Custom dark scrollbars
+- Native tooltips
+- Contextual empty states
 
 ---
 
 ## 🛠 Stack
 
-| Tecnología | Versión | Uso |
+| Technology | Version | Use |
 |---|---|---|
-| Electron | 44 | App de escritorio multiplataforma |
+| Electron | 44 | Cross-platform desktop app |
 | React | 19 | UI renderer |
-| TypeScript | 5.9 | Tipado estático |
-| Vite | 6 | Bundler del renderer |
-| @modelcontextprotocol/sdk | 1.30+ | Cliente MCP real para handshake |
-| @modelcontextprotocol/server-everything | 2026.8+ | Servidor MCP de prueba |
-| happy-dom | 20+ | Entorno DOM para tests |
-| tsx | 4.19 | Ejecución de TypeScript en tests |
+| TypeScript | 5.9 | Static typing |
+| Vite | 6 | Renderer bundler |
+| @modelcontextprotocol/sdk | 1.30+ | Real MCP client for the handshake |
+| @modelcontextprotocol/server-everything | 2026.8+ | Test MCP server |
+| happy-dom | 20+ | DOM environment for tests |
+| tsx | 4.19 | TypeScript execution in tests |
 
 ---
 
-## 📁 Estructura del proyecto
+## 📁 Project structure
 
 ```
 mcp-inspect/
 ├── src/
-│   ├── main/                    # Proceso principal de Electron
+│   ├── main/                    # Electron main process
 │   │   ├── index.ts             # Entry point + IPC handlers
-│   │   ├── proxy.ts             # Proxy STDIO MITM (spawn + pipeline bidireccional)
-│   │   ├── pipeline.ts          # MITMPipeline — reglas, breakpoints, correlación
-│   │   ├── specValidation.ts    # Validación contra schemas zod del SDK oficial
-│   │   ├── parser.ts            # Parser NDJSON JSON-RPC 2.0
-│   │   ├── mcpClient.ts         # Cliente MCP real (SDK)
-│   │   └── persistence.ts       # Guardar/cargar servers y clients
+│   │   ├── proxy.ts             # STDIO MITM proxy (spawn + bidirectional pipeline)
+│   │   ├── pipeline.ts          # MITMPipeline — rules, holds, pause, simulations, correlation
+│   │   ├── specValidation.ts    # Validation against official SDK zod schemas
+│   │   ├── parser.ts            # NDJSON JSON-RPC 2.0 parser
+│   │   ├── mcpClient.ts         # Real MCP client (SDK)
+│   │   └── persistence.ts       # Save/load servers and clients
 │   ├── preload/
-│   │   └── index.ts             # Bridge seguro (contextBridge)
-│   ├── renderer/                # UI React
-│   │   ├── App.tsx              # Componente raíz + wizard state
-│   │   ├── index.tsx            # Entry point del renderer
-│   │   ├── styles.css           # Design system completo
+│   │   └── index.ts             # Secure bridge (contextBridge)
+│   ├── renderer/                # React UI
+│   │   ├── App.tsx              # Root component + wizard state
+│   │   ├── index.tsx            # Renderer entry point
+│   │   ├── styles.css           # Full design system
 │   │   └── components/
-│   │       ├── ServerPanel.tsx   # Panel izquierdo (servers + control de proceso)
-│   │       ├── ClientPanel.tsx   # Panel derecho (clients)
-│   │       ├── LogList.tsx       # Timeline central (tráfico)
-│   │       ├── InterceptBar.tsx  # Barra de interceptación (breakpoints + reglas)
-│   │       ├── ServerCard.tsx    # Card visual de server
-│   │       ├── ClientCard.tsx    # Card visual de client
-│   │       ├── Wizard.tsx        # Wizard de 2 pasos
-│   │       ├── JsonHighlight.tsx # Syntax highlighter JSON
-│   │       └── JsonTree.tsx      # Árbol JSON expandible
+│   │       ├── ServerPanel.tsx   # Left panel (servers + process control)
+│   │       ├── ClientPanel.tsx   # Right panel (clients)
+│   │       ├── LogList.tsx       # Center chat view (traffic)
+│   │       ├── InterceptBar.tsx  # Interception bar (breakpoints + rules + simulations)
+│   │       ├── ServerCard.tsx    # Visual server card
+│   │       ├── ClientCard.tsx    # Visual client card
+│   │       ├── Wizard.tsx        # 2-step wizard
+│   │       ├── JsonHighlight.tsx # JSON syntax highlighter
+│   │       └── JsonTree.tsx      # Expandable JSON tree
 │   └── shared/
-│       └── types.ts             # Tipos compartidos
-├── tests/                        # 134 tests
-│   ├── parser.test.ts            # 13 — parser NDJSON
-│   ├── pipeline.test.ts          # 21 — reglas, holds FIFO, correlación
-│   ├── specvalidation.test.ts    # 16 — validación de spec MCP
+│       └── types.ts             # Shared types
+├── tests/                        # 157 tests
+│   ├── parser.test.ts            # 13 — NDJSON parser
+│   ├── pipeline.test.ts          # 27 — rules, FIFO holds, pause, correlation
+│   ├── pipeline-sim.test.ts     # 17 — fault/mock/throttle simulations
+│   ├── specvalidation.test.ts    # 16 — MCP spec validation
 │   ├── jsonhighlight.test.tsx    # 14 — syntax highlighter
 │   ├── wizard.test.tsx           # 12 — wizard
 │   ├── servercard.test.tsx       # 17 — ServerCard
 │   ├── clientcard.test.tsx       # 18 — ClientCard
 │   ├── loglist.test.tsx          # 12 — LogList
-│   ├── persistence.test.ts       # 11 — persistencia
-│   ├── dom-setup.ts              # Setup de happy-dom
-│   ├── render.tsx                # Helper de render React
-│   ├── proxy.demo.ts             # Demo end-to-end del proxy
-│   └── client.demo.ts            # Demo del cliente MCP
+│   ├── persistence.test.ts       # 11 — persistence
+│   ├── dom-setup.ts              # happy-dom setup
+│   ├── render.tsx                # React render helper
+│   ├── proxy.demo.ts             # End-to-end proxy demo
+│   ├── pause.demo.ts             # Global pause end-to-end demo
+│   └── client.demo.ts            # MCP client end-to-end demo
 ├── dist/                          # Build output (main + preload)
 ├── dist-renderer/                 # Build output (renderer)
 ├── package.json
@@ -148,67 +167,74 @@ mcp-inspect/
 
 ---
 
-## 🚀 Instalación
+## 🚀 Installation
 
 ```bash
-# Clonar el repositorio
+# Clone the repository
 git clone <repo-url>
 cd mcp-inspect
 
-# Instalar dependencias
+# Install dependencies
 npm install
 ```
 
-**Requisitos:**
-- Node.js 24+ (recomendado) o 20+
+**Requirements:**
+- Node.js 24+ (recommended) or 20+
 - npm 10+
-- Windows, macOS o Linux
+- Windows, macOS or Linux
 
 ---
 
-## 💻 Uso
+## 💻 Usage
 
-### Iniciar la app
+### Starting the app
 
 ```bash
 npm start
 ```
 
-Esto lanza Electron con la UI completa.
+Launches Electron with the full UI. The current app version (semver `MAJOR.MINOR.PATCH`) is displayed next to the app name in the topbar.
 
-### Flujo de uso
+### Usage flow
 
-1. **Al abrir la app** — si no hay server ni client seleccionados, aparece el wizard
-2. **Step 1** — elegir un MCP Server de las cards disponibles (o agregar uno custom con el botón "+")
-3. **Step 2** — elegir un MCP Client de las cards disponibles (o agregar uno custom)
-4. **Tráfico en vivo** — el panel central muestra toda la comunicación JSON-RPC capturada
+1. **On open** — if no server or client is selected, the wizard appears
+2. **Step 1** — choose an MCP Server from the available cards (or add a custom one with the "+ Add" button)
+3. **Step 2** — choose an MCP Client from the available cards (or add a custom one)
+4. **Live traffic** — the center panel shows all captured JSON-RPC communication as a chat
 
-### Agregar un servidor custom
+### Adding a custom server
 
-1. Click en "+" en el panel de servers
-2. Llenar: nombre, comando, args (uno por línea)
-3. Ejemplo:
-   - Nombre: `My Server`
-   - Comando: `npx`
-   - Args: `-y` (línea 1), `@my-org/my-mcp-server` (línea 2)
+1. Click "+ Add" in the servers panel
+2. Fill in: name, command, args (one per line)
+3. Example:
+   - Name: `My Server`
+   - Command: `npx`
+   - Args: `-y` (line 1), `@my-org/my-mcp-server` (line 2)
 
-### Interactuar con el servidor
+### Interacting with the server
 
-Desde el panel del cliente:
-- **📡 ping** — enviar un ping al servidor
-- **📋 tools/list** — listar todas las tools disponibles
-- **🔧 tools/call — echo** — llamar la tool echo del everything-server
-- **⏳ tools/call — longRunning** — llamar una tool con progreso
-- **Envío raw** — enviar cualquier mensaje JSON-RPC custom
+From the client panel:
+- **📡 ping** — send a ping to the server
+- **📋 tools/list** — list all available tools
+- **🔧 tools/call — echo** — call the everything-server's echo tool
+- **⏳ tools/call — longRunning** — call a tool with progress
+- **Raw send** — send any custom JSON-RPC message
 
-### Exportar/Importar sesión
+### Session control
 
-- **Exportar:** guarda toda la sesión (config + log) como JSON
-- **Importar:** carga una sesión exportada previamente
+- **↻ Reset (server header)** — restart the subprocess with the same config, session preserved
+- **↻ Reset (client header)** — disconnect + reconnect the client with a fresh handshake
+- **⏸ Pause / ▶ Resume** — freeze and release all traffic without killing the subprocess
+- **☠ Kill** — immediate SIGKILL of the subprocess
+
+### Exporting/Importing a session
+
+- **Export:** saves the whole session (config + log) as JSON
+- **Import:** loads a previously exported session
 
 ---
 
-## 🏗 Arquitectura
+## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -216,109 +242,120 @@ Desde el panel del cliente:
 │                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
 │  │  ServerPanel  │    │   LogList    │    │  ClientPanel │  │
-│  │  (selecciona  │    │  (tráfico    │    │ (selecciona  │  │
-│  │   servidor)   │    │  capturado)  │    │   cliente)   │  │
+│  │  (selects     │    │  (captured   │    │ (selects     │  │
+│  │   server)      │    │   traffic)  │    │   client)    │  │
 │  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘  │
 │         │                   │                   │           │
 │         ▼                   ▼                   ▼           │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │                     Proxy (MITM)                      │  │
-│  │  spawn(server) → pipeline → parse NDJSON → log       │  │
+││                     Proxy (MITM)                      │  │
+│  │  spawn(server) → pipeline → parse NDJSON → log      │  │
 │  └──────────────────────────────────────────────────────┘  │
 │         │                                       │           │
 │         ▼                                       ▼           │
 │  ┌──────────────┐                    ┌──────────────┐       │
 │  │  MCP Server   │◄──── JSON-RPC ────►│  MCP Client  │       │
-│  │  (stdio)       │    2.0 over NDJSON │  (SDK)       │       │
+│  │  (stdio)      │    2.0 over NDJSON │  (SDK)       │       │
 │  └──────────────┘                    └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Flujo de datos
+### Data flow
 
-1. El proceso main hace `spawn` del servidor MCP seleccionado
-2. Todo el tráfico cruza el `MITMPipeline` antes de entregarse en ambas direcciones
-3. El parser NDJSON procesa cada línea como un mensaje JSON-RPC 2.0
-4. Cada mensaje se clasifica: request, response, notification o error
-5. El cliente MCP real (SDK) se conecta al proxy y ejecuta el handshake
-6. Todo el tráfico se envía al renderer via IPC para mostrarlo en el log
-7. Si hay breakpoints activos, el pipeline retiene el mensaje hasta que el usuario decide (enviar / editar / drop / responder)
+1. The main process `spawn`s the selected MCP server
+2. All traffic crosses the `MITMPipeline` before delivery, in both directions
+3. The NDJSON parser processes each line as a JSON-RPC 2.0 message
+4. Each message is classified: request, response, notification or error
+5. The real MCP client (SDK) connects to the proxy and runs the handshake
+6. All traffic is pushed to the renderer via IPC for display in the chat view
+7. With active breakpoints the pipeline holds the message until the user decides (send / edit / drop / respond); with simulations (fault/mock/throttle) it auto-resolves
+8. The global pause queues every message per direction in FIFO order and re-enters them into the pipeline on resume
 
-### Persistencia
+### Persistence
 
-- Los servidores y clientes custom se guardan en `~/.mcp-inspector/`
-- Los presets (everything-server, echo, SDK, inspector) se re-derivan siempre, no se persisten
-- Formato: JSON simple, editable manualmente
+- Custom servers and clients are saved in `~/.mcp-inspector/`
+- Presets (everything-server, echo, SDK, inspector) are always re-derived, never persisted
+- Format: plain JSON, manually editable
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-# Todos los tests (134)
+# All tests (157)
 npm test
 
-# Solo parser
+# Parser only
 npm run test:parser
 
-# Pipeline de interceptación + validación de spec
+# Interception pipeline + spec validation
 npm run test:pipeline
 
-# Solo componentes UX
+# UX components only
 npm run test:unit
 
-# Demo del proxy end-to-end
+# End-to-end proxy demo
 npm run test:proxy
 
-# Demo del cliente MCP real end-to-end
+# Real MCP client end-to-end demo
 npm run test:client
 ```
 
-### Cobertura
+### Coverage
 
-| Suite | Tests | Qué cubre |
+| Suite | Tests | What it covers |
 |---|---|---|
-| parser | 13 | NDJSON parsing: request, response, notification, error, CRLF, feeds incrementales |
-| pipeline | 21 | Reglas de interceptación, holds FIFO, resoluciones, correlación id→método |
-| specvalidation | 16 | Validación de spec MCP contra schemas zod del SDK oficial |
+| parser | 13 | NDJSON parsing: request, response, notification, error, CRLF, incremental feeds |
+| pipeline | 27 | Interception rules, FIFO holds, resolutions, global pause, id→method correlation |
+| pipeline-sim | 17 | Fault injection, auto-mock, throttling, synthetic responses |
+| specvalidation | 16 | MCP spec validation against official SDK zod schemas |
 | jsonhighlight | 14 | Syntax highlighting: keys, strings, numbers, booleans, null, HTML escaping |
-| wizard | 12 | Steps, navegación, progreso, botones Siguiente/Atrás |
-| servercard | 17 | Badges preset/idle/running, botones CRUD, clicks, selected, disabled |
-| clientcard | 18 | Iconos por tipo, badges, CRUD, clicks, selected |
-| loglist | 12 | Filtros por tipo, búsqueda, contadores, colapsar/expandir |
-| persistence | 11 | Guardar/cargar servers/clients, presets no se persisten, round-trip |
-| **Total** | **134** | |
+| wizard | 12 | Steps, navigation, progress, Next/Back buttons |
+| servercard | 17 | preset/idle/running badges, CRUD buttons, clicks, selected, disabled |
+| clientcard | 18 | Per-type icons, badges, CRUD, clicks, selected |
+| loglist | 12 | Type filters, search, counters, expand/collapse |
+| persistence | 11 | Save/load servers/clients, presets not persisted, round-trip |
+| **Total** | **157** | |
 
 ---
 
-## 📜 Scripts disponibles
+## 📜 Available scripts
 
-| Script | Descripción |
+| Script | Description |
 |---|---|
-| `npm start` | Inicia la app Electron |
-| `npm run build` | Compila main + preload + renderer (TypeScript + Vite) |
-| `npm test` | Corre todos los tests (134) |
-| `npm run test:parser` | Solo tests del parser NDJSON (13) |
-| `npm run test:pipeline` | Tests del pipeline de interceptación + spec (37) |
-| `npm run test:unit` | Solo tests de componentes UX (99) |
-| `npm run test:proxy` | Demo end-to-end del proxy con subprocess real |
-| `npm run test:client` | Demo end-to-end del cliente MCP + everything-server |
+| `npm start` | Launches the Electron app |
+| `npm run build` | Compiles main + preload + renderer (TypeScript + Vite) |
+| `npm test` | Runs all tests (157) |
+| `npm run test:parser` | NDJSON parser tests only (13) |
+| `npm run test:pipeline` | Interception pipeline + spec tests (27 + 17 + 16) |
+| `npm run test:unit` | UX component tests only (99) |
+| `npm run test:proxy` | End-to-end proxy demo with real subprocess |
+| `npm run test:client` | Real MCP client + everything-server end-to-end demo |
 
 ---
 
 ## 🗺 Roadmap
 
-### Próximas características
+### Upcoming features
 
-- **Simulación de comportamiento** — auto-mocking por método, fault injection con errores JSON-RPC estándar (`-32601`, `-32602`, `-32603`) y throttling configurable para probar timeouts del cliente
-- **Transporte HTTP/SSE** — proxy Streamable HTTP además de STDIO, con soporte de `Mcp-Session-Id` y `Last-Event-ID`
-- **Replay y comparación** — re-ejecutar peticiones capturadas contra el server en vivo y diff entre sesiones
-- **Multi-servidor simultáneo** — sesiones concurrentes, cada una con su propio timeline
-- **Auto-proxy con 1 clic** — reescritura automática de las configs de Claude Desktop, Cursor y VS Code para interceptar su tráfico, con backup y restore
-- **DX de escritorio** — export `.har`, modo tray con atajo global `Ctrl/Cmd + Shift + I` y bóveda de credenciales cifrada para `.env`
+- **HTTP/SSE transport** — Streamable HTTP proxy in addition to STDIO, with `Mcp-Session-Id` and `Last-Event-ID` support
+- **Multi-server** — concurrent sessions, each with its own timeline
+- **Replay and compare** — re-run captured requests against the live server and diff sessions
+- **One-click auto-proxy** — automatically rewrite Claude Desktop, Cursor and VS Code configs to intercept their traffic, with backup and restore
+- **Desktop DX** — `.har` export, tray mode with global `Ctrl/Cmd + Shift + I` shortcut, and an encrypted credential vault for `.env`
+
+### Completed
+
+- ✅ MITM proxy STDIO + NDJSON parsing + spec validation
+- ✅ Breakpoints with inline editing, FIFO guarantees
+- ✅ Global pause (freeze traffic without killing the subprocess)
+- ✅ Behavior simulation: fault injection, auto-mock, throttling
+- ✅ Chat-style live traffic view
+- ✅ Reset buttons in panel headers (server restart / client reconnect)
+- ✅ Semver version display in topbar
 
 ---
 
-## 📄 Licencia
+## 📄 License
 
 MIT
