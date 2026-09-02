@@ -4,10 +4,12 @@ import ClientPanel from './components/ClientPanel';
 import LogList from './components/LogList';
 import Wizard from './components/Wizard';
 import InterceptBar from './components/InterceptBar';
+import SessionTabs from './components/SessionTabs';
 import {
   LogEntry,
   ServerConfig,
   ClientConfig,
+  SessionInfo,
   JsonRpcMessage,
   SavedServer,
   SavedClient,
@@ -17,77 +19,95 @@ import {
   SimulationConfig,
 } from '../shared/types';
 
+/** Intercept state of one session (mirrors the preload shape). */
+interface InterceptState {
+  serverId: string;
+  rules: InterceptRule[];
+  interceptAllC2s: boolean;
+  interceptAllS2c: boolean;
+  held: HeldMessage[];
+  paused?: boolean;
+  queue?: { c2s: number; s2c: number };
+}
+
 // Type of the bridge exposed by preload.ts via contextBridge.
 declare global {
   interface Window {
     api: {
-      start(c: ServerConfig): Promise<{ ok: boolean; running: boolean; error?: string }>;
-      stop(): Promise<{ ok: boolean }>;
-      restart(): Promise<{ ok: boolean; running?: boolean; error?: string }>;
-      killServer(): Promise<{ ok: boolean }>;
-      pauseServer(): Promise<{ ok: boolean; paused: boolean }>;
-      resumeServer(): Promise<{ ok: boolean; paused: boolean }>;
-      write(m: JsonRpcMessage): Promise<{ ok: boolean }>;
-      status(): Promise<{ running: boolean; count: number }>;
-      clientRequest(method: string, params?: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>;
-      clientNotify(method: string, params?: unknown): Promise<{ ok: boolean; error?: string }>;
-      clientStatus(): Promise<{ connected: boolean; server: { name?: string; version?: string; capabilities?: unknown } | null }>;
-      clientRestart(): Promise<{ ok: boolean; error?: string }>;
+      start(serverId: string, name: string, c: ServerConfig): Promise<{ ok: boolean; running: boolean; error?: string }>;
+      stop(serverId: string): Promise<{ ok: boolean; error?: string }>;
+      restart(serverId: string): Promise<{ ok: boolean; running?: boolean; error?: string }>;
+      killServer(serverId: string): Promise<{ ok: boolean; error?: string }>;
+      pauseServer(serverId: string): Promise<{ ok: boolean; paused: boolean; error?: string }>;
+      resumeServer(serverId: string): Promise<{ ok: boolean; paused: boolean; error?: string }>;
+      write(serverId: string, m: JsonRpcMessage): Promise<{ ok: boolean }>;
+      status(serverId: string): Promise<{ running: boolean; count: number }>;
+      sessionList(): Promise<SessionInfo[]>;
+      sessionClose(serverId: string): Promise<{ ok: boolean }>;
+      clientRequest(serverId: string, method: string, params?: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>;
+      clientNotify(serverId: string, method: string, params?: unknown): Promise<{ ok: boolean; error?: string }>;
+      clientStatus(serverId: string): Promise<{ connected: boolean; server: { name?: string; version?: string; capabilities?: unknown } | null }>;
+      clientRestart(serverId: string): Promise<{ ok: boolean; error?: string }>;
       appVersion(): Promise<string>;
-      exportSession(): Promise<{ ok: boolean; filePath?: string; error?: string }>;
-      importSession(): Promise<{ ok: boolean; count?: number; error?: string }>;
+      exportSession(serverId: string): Promise<{ ok: boolean; filePath?: string; error?: string }>;
+      importSession(serverId: string): Promise<{ ok: boolean; count?: number; error?: string }>;
       loadServers(): Promise<SavedServer[]>;
       saveServers(servers: SavedServer[]): Promise<{ ok: boolean }>;
       loadClients(): Promise<SavedClient[]>;
       saveClients(clients: SavedClient[]): Promise<{ ok: boolean }>;
-      interceptList(): Promise<{ rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[]; paused?: boolean; queue?: { c2s: number; s2c: number } }>;
-      interceptAddRule(dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig): Promise<{ ok: boolean; rule?: InterceptRule }>;
-      interceptRemoveRule(id: string): Promise<{ ok: boolean }>;
-      interceptToggleRule(id: string, enabled: boolean): Promise<{ ok: boolean }>;
-      interceptSetInterceptAll(dir: 'c2s' | 's2c', on: boolean): Promise<{ ok: boolean }>;
-      interceptResolve(id: string, resolution: HoldResolution): Promise<{ ok: boolean }>;
-      interceptClear(): Promise<{ ok: boolean }>;
+      interceptList(serverId: string): Promise<InterceptState>;
+      interceptAddRule(serverId: string, dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig): Promise<{ ok: boolean; rule?: InterceptRule }>;
+      interceptRemoveRule(serverId: string, id: string): Promise<{ ok: boolean }>;
+      interceptToggleRule(serverId: string, id: string, enabled: boolean): Promise<{ ok: boolean }>;
+      interceptSetRuleSimulation(serverId: string, id: string, simulation: SimulationConfig | null): Promise<{ ok: boolean }>;
+      interceptSetInterceptAll(serverId: string, dir: 'c2s' | 's2c', on: boolean): Promise<{ ok: boolean }>;
+      interceptResolve(serverId: string, id: string, resolution: HoldResolution): Promise<{ ok: boolean }>;
+      interceptClear(serverId: string): Promise<{ ok: boolean }>;
       clipboardWrite(text: string): Promise<{ ok: boolean }>;
       specGet(): Promise<{ enabled: boolean }>;
       specSet(enabled: boolean): Promise<{ ok: boolean }>;
       onEntry(cb: (e: LogEntry) => void): () => void;
-      onExit(cb: (info: { code: number | null; signal: string | null }) => void): () => void;
-      onError(cb: (info: { message: string }) => void): () => void;
-      onClientConnected(cb: (info: { serverName: string; serverVersion: string }) => void): () => void;
-      onClientClosed(cb: () => void): () => void;
-      onClientError(cb: (info: { message: string }) => void): () => void;
-      onInterceptRules(cb: (state: { rules: InterceptRule[]; interceptAllC2s: boolean; interceptAllS2c: boolean; held: HeldMessage[]; paused?: boolean; queue?: { c2s: number; s2c: number } }) => void): () => void;
+      onExit(cb: (info: { serverId: string; code: number | null; signal: string | null }) => void): () => void;
+      onError(cb: (info: { serverId?: string; message: string }) => void): () => void;
+      onSessionState(cb: (sessions: SessionInfo[]) => void): () => void;
+      onClientConnected(cb: (info: { serverId: string; serverName: string; serverVersion: string }) => void): () => void;
+      onClientClosed(cb: (info: { serverId: string }) => void): () => void;
+      onClientError(cb: (info: { serverId?: string; message: string }) => void): () => void;
+      onInterceptRules(cb: (state: InterceptState) => void): () => void;
       onInterceptHeld(cb: (held: HeldMessage) => void): () => void;
-      onInterceptReleased(cb: () => void): () => void;
+      onInterceptReleased(cb: (info: { serverId: string }) => void): () => void;
+      onPausedChanged(cb: (info: { serverId: string; paused: boolean }) => void): () => void;
     };
   }
 }
 
 export default function App(): React.ReactElement {
-  // ——— Traffic / session state ———
-  const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [running, setRunning] = useState(false);
-  const [clientConnected, setClientConnected] = useState(false);
-  const [serverInfo, setServerInfo] = useState<{ name?: string; version?: string; capabilities?: unknown } | null>(null);
-  const [lastToolResult, setLastToolResult] = useState<LogEntry | null>(null);
-  const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string>('Ready. Select a server and a client to start.');
-  // App version (semver MAJOR.MINOR.PATCH — package.json)
-  const [appVersion, setAppVersion] = useState<string>('');
-
   // ——— Persisted servers/clients ———
   const [servers, setServers] = useState<SavedServer[]>([]);
   const [clients, setClients] = useState<SavedClient[]>([]);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
+  // ——— Live sessions (M1) ———
+  // One entry per started server. The active tab = selectedServerId:
+  // selecting a card focuses that session's tab; starting a server
+  // creates/refreshes its session and focuses it.
+  const [sessionList, setSessionList] = useState<SessionInfo[]>([]);
+  const [sessionEntries, setSessionEntries] = useState<Record<string, LogEntry[]>>({});
+  const [clientConnectedMap, setClientConnectedMap] = useState<Record<string, boolean>>({});
+  const [serverInfoMap, setServerInfoMap] = useState<Record<string, { name?: string; version?: string; capabilities?: unknown } | null>>({});
+  const [exitInfoMap, setExitInfoMap] = useState<Record<string, { code: number | null; signal: string | null } | undefined>>({});
+  const [lastToolResult, setLastToolResult] = useState<LogEntry | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string>('Ready. Select a server and a client to start.');
+  // App version (semver MAJOR.MINOR.PATCH — package.json)
+  const [appVersion, setAppVersion] = useState<string>('');
+
   // ——— Wizard state ———
-  // Only show wizard when both are null AND it's the initial load (no prior selection)
   const [wizardStep, setWizardStep] = useState<1 | 2>(1);
   const [showWizard, setShowWizard] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
-  // ——— Intercept state (Phase 6) ———
+  // ——— Intercept state of the ACTIVE session (Phase 6) ———
   const [interceptRules, setInterceptRules] = useState<InterceptRule[]>([]);
   const [interceptAllC2s, setInterceptAllC2sState] = useState(false);
   const [interceptAllS2c, setInterceptAllS2cState] = useState(false);
@@ -100,6 +120,36 @@ export default function App(): React.ReactElement {
 
   const hasSelection = selectedServerId !== null && selectedClientId !== null;
   const autoStarted = useRef(false);
+
+  // ——— Derived: active session ———
+  const activeSession = sessionList.find((s) => s.serverId === selectedServerId) ?? null;
+  const running = activeSession?.running ?? false;
+  const activeEntries = (selectedServerId && sessionEntries[selectedServerId]) || [];
+  const exitInfo = (selectedServerId && exitInfoMap[selectedServerId]) ?? null;
+  const clientConnected = Boolean(selectedServerId && clientConnectedMap[selectedServerId]);
+  const serverInfo = (selectedServerId && serverInfoMap[selectedServerId]) ?? null;
+
+  /** Refreshes the active tab's intercept state from main. */
+  const refreshIntercept = useCallback(async () => {
+    if (!selectedServerId) return;
+    const s = await window.api.interceptList(selectedServerId);
+    if (s.serverId && s.serverId === selectedServerId) {
+      setInterceptRules(s.rules);
+      setInterceptAllC2sState(s.interceptAllC2s);
+      setInterceptAllS2cState(s.interceptAllS2c);
+      setHeldMessages(s.held);
+      if (s.paused !== undefined) setPaused(s.paused);
+      if (s.queue !== undefined) setPausedQueue(s.queue);
+    }
+  }, [selectedServerId]);
+
+  /** Refreshes the active tab's client status from main. */
+  const refreshClientStatus = useCallback(async () => {
+    if (!selectedServerId) return;
+    const s = await window.api.clientStatus(selectedServerId);
+    setClientConnectedMap((prev) => ({ ...prev, [selectedServerId]: s.connected }));
+    setServerInfoMap((prev) => ({ ...prev, [selectedServerId]: s.server }));
+  }, [selectedServerId]);
 
   // ——— Load persisted servers/clients on mount ———
   useEffect(() => {
@@ -124,70 +174,72 @@ export default function App(): React.ReactElement {
       if (loadedServers.length === 0 && loadedClients.length === 0) {
         setShowWizard(true);
       }
+      // Pull live sessions (tabs) — survives renderer reloads
+      const live = await window.api.sessionList();
+      setSessionList(live);
       setInitialized(true);
     })();
   }, []);
 
   // ——— IPC event subscriptions ———
   useEffect(() => {
-    const offEntry = window.api.onEntry((e) => setEntries((prev) => [...prev, e]));
+    const offEntry = window.api.onEntry((e) => {
+      if (e.serverId) {
+        setSessionEntries((prev) => ({ ...prev, [e.serverId!]: [...(prev[e.serverId!] ?? []), e] }));
+      }
+    });
+    const offSessionState = window.api.onSessionState((list) => setSessionList(list));
     const offExit = window.api.onExit((info) => {
-      setRunning(false);
-      setClientConnected(false);
-      setExitInfo(info);
-      setPaused(false);
+      setExitInfoMap((prev) => ({ ...prev, [info.serverId]: { code: info.code, signal: info.signal } }));
+      setClientConnectedMap((prev) => ({ ...prev, [info.serverId]: false }));
       setStatusMsg(`Server exit code=${info.code} signal=${info.signal}`);
     });
-    const offError = window.api.onError((info) => setStatusMsg(`ERROR: ${info.message}`));
-    const offConn = window.api.onClientConnected((info) => {
-      setClientConnected(true);
-      setStatusMsg(`Client connected to ${info.serverName} v${info.serverVersion} — handshake complete.`);
-      void window.api.clientStatus().then((s) => setServerInfo(s.server));
+    const offError = window.api.onError((info) => {
+      setStatusMsg(`ERROR${info.serverId ? ` [${info.serverId}]` : ''}: ${info.message}`);
     });
-    const offClosed = window.api.onClientClosed(() => {
-      setClientConnected(false);
+    const offConn = window.api.onClientConnected((info) => {
+      setClientConnectedMap((prev) => ({ ...prev, [info.serverId]: true }));
+      setStatusMsg(`Client connected to ${info.serverName} v${info.serverVersion} — handshake complete.`);
+      void window.api.clientStatus(info.serverId).then((s) => {
+        setServerInfoMap((prev) => ({ ...prev, [info.serverId]: s.server }));
+      });
+    });
+    const offClosed = window.api.onClientClosed((info) => {
+      setClientConnectedMap((prev) => ({ ...prev, [info.serverId]: false }));
       setStatusMsg('Client disconnected.');
     });
     const offCError = window.api.onClientError((info) => setStatusMsg(`CLIENT ERROR: ${info.message}`));
     const offIRules = window.api.onInterceptRules((state) => {
-      setInterceptRules(state.rules);
-      setInterceptAllC2sState(state.interceptAllC2s);
-      setInterceptAllS2cState(state.interceptAllS2c);
-      setHeldMessages(state.held);
-      if (state.paused !== undefined) setPaused(state.paused);
-      if (state.queue !== undefined) setPausedQueue(state.queue);
+      // Only the active tab's rules are rendered.
+      if (state.serverId && state.serverId === selectedServerIdRef.current) {
+        setInterceptRules(state.rules);
+        setInterceptAllC2sState(state.interceptAllC2s);
+        setInterceptAllS2cState(state.interceptAllS2c);
+        setHeldMessages(state.held);
+        if (state.paused !== undefined) setPaused(state.paused);
+        if (state.queue !== undefined) setPausedQueue(state.queue);
+      }
     });
-    const offIHeld = window.api.onInterceptHeld(() => {
-      void window.api.interceptList().then((s) => {
-        setInterceptRules(s.rules);
-        setInterceptAllC2sState(s.interceptAllC2s);
-        setInterceptAllS2cState(s.interceptAllS2c);
-        setHeldMessages(s.held);
-      });
-    });
-    const offIReleased = window.api.onInterceptReleased(() => {
-      void window.api.interceptList().then((s) => {
-        setInterceptRules(s.rules);
-        setInterceptAllC2sState(s.interceptAllC2s);
-        setInterceptAllS2cState(s.interceptAllS2c);
-        setHeldMessages(s.held);
-      });
+    const offIHeld = window.api.onInterceptHeld(() => { void refreshIntercept(); });
+    const offIReleased = window.api.onInterceptReleased(() => { void refreshIntercept(); });
+    const offPausedChanged = window.api.onPausedChanged((info) => {
+      if (info.serverId === selectedServerIdRef.current) setPaused(info.paused);
     });
     return () => {
-      offEntry(); offExit(); offError(); offConn(); offClosed(); offCError();
-      offIRules(); offIHeld(); offIReleased();
+      offEntry(); offSessionState(); offExit(); offError(); offConn(); offClosed(); offCError();
+      offIRules(); offIHeld(); offIReleased(); offPausedChanged();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch intercept state on mount
+  // selectedServerId mirrored in a ref so the IPC subscription stays stable
+  const selectedServerIdRef = useRef<string | null>(null);
   useEffect(() => {
-    void window.api.interceptList().then((s) => {
-      setInterceptRules(s.rules);
-      setInterceptAllC2sState(s.interceptAllC2s);
-      setInterceptAllS2cState(s.interceptAllS2c);
-      setHeldMessages(s.held);
-    });
-  }, []);
+    selectedServerIdRef.current = selectedServerId;
+    // Tab switch: re-hydrate the intercept state of the newly active session.
+    void refreshIntercept();
+    void refreshClientStatus();
+  }, [selectedServerId, refreshIntercept, refreshClientStatus]);
 
   // ——— Server CRUD ———
   const handleSelectServer = useCallback((id: string) => {
@@ -238,11 +290,15 @@ export default function App(): React.ReactElement {
       void window.api.saveServers(updated);
       return updated;
     });
+    // If a live session exists for the deleted server, tear it down.
+    if (sessionList.some((s) => s.serverId === id)) {
+      void window.api.sessionClose(id);
+    }
     if (selectedServerId === id) {
       setSelectedServerId(null);
       setConfig({ command: '', args: [] });
     }
-  }, [selectedServerId]);
+  }, [selectedServerId, sessionList]);
 
   // ——— Client CRUD ———
   const handleSelectClient = useCallback((id: string) => {
@@ -289,60 +345,77 @@ export default function App(): React.ReactElement {
     }
   }, [selectedClientId]);
 
-  // ——— Start / Stop ———
+  // ——— Start / Stop (per session) ———
   const onStart = useCallback(async () => {
-    setEntries([]);
-    setExitInfo(null);
+    const server = servers.find((s) => s.id === selectedServerId);
+    if (!server) {
+      setStatusMsg('Select a server first.');
+      return;
+    }
+    const targetConfig = server.config;
+    if (selectedServerId) {
+      setSessionEntries((prev) => ({ ...prev, [selectedServerId]: [] }));
+    }
+    setExitInfoMap((prev) => ({ ...prev, [server.id]: undefined }));
     setLastToolResult(null);
     setStatusMsg('Spawning server + client handshake…');
-    const r = await window.api.start(config);
-    setRunning(r.running);
+    const r = await window.api.start(server.id, server.name, targetConfig);
     if (!r.ok) {
       setStatusMsg(`Failed to start: ${r.error ?? 'unknown'}`);
     }
-  }, [config]);
+  }, [servers, selectedServerId]);
 
   // Restart the subprocess with the same config (Phase 5)
   const onRestart = useCallback(async () => {
+    if (!selectedServerId) return;
     setStatusMsg('Restarting server…');
-    const r = await window.api.restart();
+    const r = await window.api.restart(selectedServerId);
     if (r.ok) {
-      setRunning(r.running ?? true);
       setStatusMsg('Server restarted — session preserved.');
     } else {
       setStatusMsg(`Restart failed: ${r.error ?? 'unknown'}`);
     }
-  }, []);
+  }, [selectedServerId]);
 
   // Reset the MCP client: disconnect + reconnect (fresh handshake), without touching the server
   const onClientRestart = useCallback(async () => {
+    if (!selectedServerId) return;
     setStatusMsg('Reconnecting client…');
-    const r = await window.api.clientRestart();
+    const r = await window.api.clientRestart(selectedServerId);
     setStatusMsg(r.ok ? 'Client reconnected — handshake complete.' : `Reconnect failed: ${r.error ?? 'unknown'}`);
-  }, []);
+  }, [selectedServerId]);
 
   // Kill the subprocess immediately (Phase 5)
   const onKill = useCallback(async () => {
-    await window.api.killServer();
+    if (!selectedServerId) return;
+    await window.api.killServer(selectedServerId);
     setStatusMsg('Server killed (SIGKILL).');
-  }, []);
+  }, [selectedServerId]);
 
   // MITM pause: freeze ALL traffic without killing the subprocess (Phase 6)
   const onPause = useCallback(async () => {
-    const r = await window.api.pauseServer();
+    if (!selectedServerId) return;
+    const r = await window.api.pauseServer(selectedServerId);
     if (r.ok) {
       setPaused(true);
       setStatusMsg('Traffic paused — the server stays alive.');
     }
-  }, []);
+  }, [selectedServerId]);
 
   // Resume: release the FIFO queue (messages re-enter the pipeline)
   const onResume = useCallback(async () => {
-    const r = await window.api.resumeServer();
+    if (!selectedServerId) return;
+    const r = await window.api.resumeServer(selectedServerId);
     if (r.ok) {
       setPaused(false);
       setStatusMsg('Traffic resumed — the queue was released in order.');
     }
+  }, [selectedServerId]);
+
+  // Close a session tab: stop the server, keep the saved card.
+  const onCloseSession = useCallback(async (serverId: string) => {
+    await window.api.sessionClose(serverId);
+    setStatusMsg('Session closed — server stopped.');
   }, []);
 
   // Auto-start when both server + client are selected (once)
@@ -358,10 +431,11 @@ export default function App(): React.ReactElement {
     }
   }, [hasSelection, config, running, onStart]);
 
-  // ——— Client → server interaction ———
+  // ——— Client → server interaction (active session) ———
   const doRequest = useCallback(async (method: string, params?: unknown, label?: string) => {
+    if (!selectedServerId) return;
     setStatusMsg(`Sending ${label ?? method}…`);
-    const r = await window.api.clientRequest(method, params);
+    const r = await window.api.clientRequest(selectedServerId, method, params);
     if (r.ok) {
       setStatusMsg(`${label ?? method} OK — response in the log.`);
       setLastToolResult({
@@ -371,7 +445,7 @@ export default function App(): React.ReactElement {
     } else {
       setStatusMsg(`ERROR in ${label ?? method}: ${r.error}`);
     }
-  }, []);
+  }, [selectedServerId]);
 
   const onPing = useCallback(() => { void doRequest('ping', undefined, 'ping'); }, [doRequest]);
   const onListTools = useCallback(() => { void doRequest('tools/list', undefined, 'tools/list'); }, [doRequest]);
@@ -383,59 +457,66 @@ export default function App(): React.ReactElement {
   }, [doRequest]);
 
   const onSendRaw = useCallback(async (raw: string) => {
+    if (!selectedServerId) return;
     try {
       const msg = JSON.parse(raw) as JsonRpcMessage;
-      const r = await window.api.write(msg);
+      const r = await window.api.write(selectedServerId, msg);
       setStatusMsg(r.ok ? 'Raw sent (c2s in the log).' : 'Server not alive — could not send.');
     } catch {
       setStatusMsg('Invalid JSON — not sent.');
     }
-  }, []);
+  }, [selectedServerId]);
 
   const onExport = useCallback(async () => {
-    const r = await window.api.exportSession();
+    if (!selectedServerId) return;
+    const r = await window.api.exportSession(selectedServerId);
     setStatusMsg(r.ok ? `Exported to ${r.filePath}` : `Export canceled (${r.error})`);
-  }, []);
+  }, [selectedServerId]);
 
   const onImport = useCallback(async () => {
-    const r = await window.api.importSession();
+    if (!selectedServerId) return;
+    const r = await window.api.importSession(selectedServerId);
     setStatusMsg(r.ok ? `Imported: ${r.count} entries` : `Import canceled (${r.error})`);
     if (r.ok) {
-      const s = await window.api.status();
-      setEntries((prev) => prev.slice(0, s.count));
+      const s = await window.api.status(selectedServerId);
+      setSessionEntries((prev) => ({ ...prev, [selectedServerId!]: [] }));
+      // Entries arrive via the proxy:entry push replay.
+      void s;
     }
-  }, []);
+  }, [selectedServerId]);
 
-  // ——— Intercept handlers (Phase 6+7) ———
+  // ——— Intercept handlers (Phase 6+7, active session) ———
   const handleAddRule = useCallback((dir: 'c2s' | 's2c', method: string, simulation?: SimulationConfig) => {
-    void window.api.interceptAddRule(dir, method, simulation);
-  }, []);
+    if (!selectedServerId) return;
+    void window.api.interceptAddRule(selectedServerId, dir, method, simulation);
+  }, [selectedServerId]);
 
   const handleRemoveRule = useCallback((id: string) => {
-    void window.api.interceptRemoveRule(id);
-  }, []);
+    if (!selectedServerId) return;
+    void window.api.interceptRemoveRule(selectedServerId, id);
+  }, [selectedServerId]);
 
   const handleToggleRule = useCallback((id: string, enabled: boolean) => {
-    void window.api.interceptToggleRule(id, enabled);
-  }, []);
+    if (!selectedServerId) return;
+    void window.api.interceptToggleRule(selectedServerId, id, enabled);
+  }, [selectedServerId]);
 
   const handleSetInterceptAll = useCallback((dir: 'c2s' | 's2c', on: boolean) => {
-    void window.api.interceptSetInterceptAll(dir, on);
-  }, []);
+    if (!selectedServerId) return;
+    void window.api.interceptSetInterceptAll(selectedServerId, dir, on);
+  }, [selectedServerId]);
 
   const handleInterceptClear = useCallback(async () => {
-    await window.api.interceptClear();
-    const s = await window.api.interceptList();
-    setInterceptRules(s.rules);
-    setInterceptAllC2sState(s.interceptAllC2s);
-    setInterceptAllS2cState(s.interceptAllS2c);
-    setHeldMessages(s.held);
-  }, []);
+    if (!selectedServerId) return;
+    await window.api.interceptClear(selectedServerId);
+    void refreshIntercept();
+  }, [selectedServerId, refreshIntercept]);
 
   const handleResolveHold = useCallback(async (id: string, resolution: HoldResolution) => {
-    const r = await window.api.interceptResolve(id, resolution);
+    if (!selectedServerId) return;
+    const r = await window.api.interceptResolve(selectedServerId, id, resolution);
     if (!r.ok) setStatusMsg('The hold was already resolved or does not exist.');
-  }, []);
+  }, [selectedServerId]);
 
   // ——— Wizard handlers ———
   const handleWizardAdvance = useCallback(() => {
@@ -506,7 +587,7 @@ export default function App(): React.ReactElement {
               `${pausedQueue.c2s + pausedQueue.s2c} queued (→${pausedQueue.c2s} ←${pausedQueue.s2c})`
             }</span>
           )}
-          <span className="pill">{entries.length} messages</span>
+          <span className="pill">{activeEntries.length} messages</span>
           {exitInfo && <span className="pill">exit code={exitInfo.code}</span>}
         </div>
       </header>
@@ -529,6 +610,12 @@ export default function App(): React.ReactElement {
           onResume={onResume}
         />
         <div className="center-col">
+          <SessionTabs
+            sessions={sessionList}
+            activeServerId={selectedServerId}
+            onSelect={handleSelectServer}
+            onClose={onCloseSession}
+          />
           <InterceptBar
             rules={interceptRules}
             interceptAllC2s={interceptAllC2s}
@@ -541,28 +628,8 @@ export default function App(): React.ReactElement {
             onClearAll={handleInterceptClear}
             onResolve={handleResolveHold}
           />
-          <LogList entries={entries} />
+          <LogList entries={activeEntries} />
         </div>
-        <ClientPanel
-          clients={clients}
-          selectedClientId={selectedClientId}
-          onSelectClient={handleSelectClient}
-          onAddClient={handleAddClient}
-          onUpdateClient={handleUpdateClient}
-          onDeleteClient={handleDeleteClient}
-          clientConnected={clientConnected}
-          serverInfo={serverInfo}
-          lastToolResult={lastToolResult}
-          hasSelection={hasSelection}
-          onPing={onPing}
-          onListTools={onListTools}
-          onCallEcho={onCallEcho}
-          onCallLongRunning={onCallLongRunning}
-          onSendRaw={onSendRaw}
-          onClientRestart={onClientRestart}
-          onExport={onExport}
-          onImport={onImport}
-        />
       </div>
       <footer className="status">
         <div className="status-left">{statusMsg}</div>

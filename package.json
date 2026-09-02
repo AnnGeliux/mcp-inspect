@@ -11,7 +11,7 @@
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "start": "npm run build && electron .",
-    "test": "node --test --import tsx --import ./tests/dom-setup.ts tests/parser.test.ts tests/pipeline.test.ts tests/pipeline-sim.test.ts tests/specvalidation.test.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx",
+    "test": "node --test --import tsx --import ./tests/dom-setup.ts tests/parser.test.ts tests/pipeline.test.ts tests/pipeline-sim.test.ts tests/specvalidation.test.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx tests/sessiontabs.test.tsx",
     "test:parser": "node --test --import tsx tests/parser.test.ts",
     "test:unit": "node --test --import tsx --import ./tests/dom-setup.ts tests/persistence.test.ts tests/jsonhighlight.test.tsx tests/wizard.test.tsx tests/servercard.test.tsx tests/clientcard.test.tsx tests/loglist.test.tsx",
     "test:proxy": "tsx tests/proxy.demo.ts",

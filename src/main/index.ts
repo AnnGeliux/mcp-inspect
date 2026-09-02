@@ -1,20 +1,21 @@
 /**
  * Electron main process entry point.
  * Creates the window, loads the Vite renderer, and exposes IPC for:
- *   - proxy:start (spawn server + connect real MCP client)
+ *   - proxy:start (spawn server + connect real MCP client) — multi-session
  *   - proxy:stop / proxy:restart / proxy:kill
+ *   - proxy:pause / proxy:resume (MITM freeze)
  *   - proxy:write (client → server, raw)
- *   - client:request / client:notify / client:status (real SDK client)
- *   - proxy:status
- *   - intercept:* (rules, holds, resolution)
- *   - clipboard:write · spec:get/set
- *   - session:export / session:import
+ *   - client:request / client:notify / client:status / client:restart
+ *   - intercept:* (rules, holds, resolution) — per session
+ *   - session:list / session:close / session:export / session:import
  *   - servers:load/save · clients:load/save
+ *   - clipboard:write · spec:get/set · app:getVersion
  *
- * Phase 5: every entry is enriched with latency (rpcId correlation done in
- * the proxy/pipeline) and spec validation (zod schemas from the SDK).
- * Phase 6: the interception pipeline lives in the proxy; here we only
- * expose its control and push state to the renderer.
+ * M1 (multi-server): the old singleton proxy was replaced by a session
+ * registry — Map<serverId, Session>. Each session owns its StdioProxy,
+ * its MITMPipeline (rules/holds live there), its SDK client and its log
+ * entries. All stateful IPC takes a serverId; the renderer shows one tab
+ * per session. Phase 8 will add kind 'http' sessions on this registry.
  */
 
 import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron';
@@ -28,6 +29,7 @@ import {
   LogEntry,
   ServerConfig,
   SessionExport,
+  SessionInfo,
   JsonRpcMessage,
   SavedServer,
   SavedClient,
@@ -128,10 +130,118 @@ async function saveClients(clients: SavedClient[]): Promise<void> {
 }
 
 let mainWindow: BrowserWindow | null = null;
-const proxy = new StdioProxy();
-const mcpClient = new McpClientController();
-const sessionEntries: LogEntry[] = [];
-let sessionConfig: ServerConfig | null = null;
+
+// ——— Multi-server session registry (M1) ————————————————————————————
+
+/** A live proxy session — one per started server. */
+interface Session {
+  /** SavedServer id this session runs. */
+  id: string;
+  /** Display name (from the SavedServer). */
+  name: string;
+  /** Config the session was started with. */
+  config: ServerConfig;
+  /** Transport kind — stdio today; Phase 8 adds 'http'. */
+  kind: 'stdio' | 'http';
+  /** The MITM proxy owning the subprocess + pipeline. */
+  proxy: StdioProxy;
+  /** The real SDK client connected to this session's proxy. */
+  client: McpClientController;
+  /** Traffic log of this session. */
+  entries: LogEntry[];
+}
+
+const sessions = new Map<string, Session>();
+
+function createSession(serverId: string, name: string, config: ServerConfig): Session {
+  const session: Session = {
+    id: serverId,
+    name,
+    config,
+    kind: 'stdio',
+    proxy: new StdioProxy(),
+    client: new McpClientController(),
+    entries: [],
+  };
+  wireSession(session);
+  sessions.set(serverId, session);
+  return session;
+}
+
+/** Registers all proxy/pipeline/client listeners of a session. */
+function wireSession(s: Session): void {
+  s.proxy.on('entry', (entry: LogEntry) => pushEntry(s, entry));
+  s.proxy.on('exit', (code: number | null, signal: string | null) => {
+    mainWindow?.webContents.send('proxy:exit', { serverId: s.id, code, signal });
+    pushSessionState();
+  });
+  s.proxy.on('error', (err: Error) => {
+    mainWindow?.webContents.send('proxy:error', { serverId: s.id, message: err.message });
+  });
+
+  s.proxy.pipeline.on('rulesChanged', () => pushInterceptState(s));
+  s.proxy.pipeline.on('held', () => pushInterceptState(s));
+  s.proxy.pipeline.on('released', () => {
+    mainWindow?.webContents.send('intercept:released', { serverId: s.id });
+    pushInterceptState(s);
+  });
+  s.proxy.pipeline.on('pausedChanged', () => {
+    mainWindow?.webContents.send('proxy:pausedChanged', { serverId: s.id, paused: s.proxy.pipeline.paused });
+    pushInterceptState(s);
+  });
+  s.proxy.pipeline.on('queueChanged', () => pushInterceptState(s));
+
+  s.client.on('connected', (info: { serverName: string; serverVersion: string }) => {
+    mainWindow?.webContents.send('client:connected', { serverId: s.id, ...info });
+  });
+  s.client.on('closed', () => {
+    mainWindow?.webContents.send('client:closed', { serverId: s.id });
+  });
+  s.client.on('error', (err: Error) => {
+    // "Received a response for an unknown message ID: {huge payload}" —
+    // a response arriving AFTER its request expired (e.g. held in
+    // pause/hold longer than the client's timeout). Translated short:
+    // the full payload is already visible as an s2c entry in the log.
+    const raw = err instanceof Error ? err.message : String(err);
+    const message = raw.startsWith('Received a response for an unknown message ID')
+      ? 'Orphan response — the request expired while paused/held and the server replied afterwards. The payload is in the log.'
+      : raw;
+    mainWindow?.webContents.send('client:error', { serverId: s.id, message });
+  });
+}
+
+/** Tears a session down: flush holds, stop client + proxy, drop listeners. */
+async function closeSession(serverId: string): Promise<void> {
+  const s = sessions.get(serverId);
+  if (!s) return;
+  sessions.delete(serverId);
+  try {
+    await s.proxy.pipeline.flushAll();
+    if (s.client.connected) await s.client.stop();
+    if (s.proxy.running) await s.proxy.stop();
+  } finally {
+    s.proxy.pipeline.removeAllListeners();
+    s.proxy.removeAllListeners();
+    s.client.removeAllListeners();
+  }
+  pushSessionState();
+}
+
+function sessionSnapshot(): SessionInfo[] {
+  return Array.from(sessions.values()).map((s) => ({
+    serverId: s.id,
+    name: s.name,
+    kind: s.kind,
+    running: s.proxy.running,
+    paused: s.proxy.pipeline.paused,
+    queued: s.proxy.pipeline.queueLengths(),
+  }));
+}
+
+/** Pushes the full session list (tabs) to the renderer. */
+function pushSessionState(): void {
+  mainWindow?.webContents.send('session:state', sessionSnapshot());
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -163,7 +273,7 @@ function createWindow(): void {
 /** Spec validation enabled (toggled from the UI). Default: on. */
 let specValidationOn = true;
 
-function pushEntry(entry: LogEntry): void {
+function pushEntry(s: Session, entry: LogEntry): void {
   // Phase 5 — spec validation against zod schemas from the SDK.
   // Only MCP entries (stderr/lifecycle carry raw text, not JSON-RPC).
   if (specValidationOn && entry.stderr === undefined) {
@@ -173,7 +283,8 @@ function pushEntry(entry: LogEntry): void {
       if (spec) entry.spec = spec;
     }
   }
-  sessionEntries.push(entry);
+  entry.serverId = s.id;
+  s.entries.push(entry);
   mainWindow?.webContents.send('proxy:entry', entry);
 }
 
@@ -187,8 +298,8 @@ function parseEntryMessage(entry: LogEntry): JsonRpcMessage | null {
 }
 
 /** Synthetic entry for lifecycle events (not JSON-RPC). */
-function pushLifecycleEntry(kind: 'info' | 'error', message: string): void {
-  pushEntry({
+function pushLifecycleEntry(s: Session, kind: 'info' | 'error', message: string): void {
+  pushEntry(s, {
     seq: lifecycleSeq++,
     ts: new Date().toISOString(),
     dir: 's2c',
@@ -201,160 +312,111 @@ function pushLifecycleEntry(kind: 'info' | 'error', message: string): void {
 }
 let lifecycleSeq = 900000; // separate range to avoid clashing with proxy/client seq
 
-// ——— Proxy listeners (registered once) ———————————————————————————
+// ——— Intercept state push (per session) ——————————————————————————
 
-proxy.on('entry', pushEntry);
-proxy.on('exit', (code, signal) => {
-  mainWindow?.webContents.send('proxy:exit', { code, signal });
-});
-proxy.on('error', (err) => {
-  mainWindow?.webContents.send('proxy:error', { message: err.message });
-});
-
-// ——— Interception: push pipeline state ——————————————————————————
-
-function pushInterceptState(): void {
+function pushInterceptState(s: Session): void {
   mainWindow?.webContents.send('intercept:rules', {
-    rules: proxy.pipeline.listRules(),
-    interceptAllC2s: proxy.pipeline.getInterceptAll('c2s'),
-    interceptAllS2c: proxy.pipeline.getInterceptAll('s2c'),
-    held: proxy.pipeline.listHeld(),
-    paused: proxy.pipeline.paused,
-    queue: proxy.pipeline.queueLengths(),
+    serverId: s.id,
+    rules: s.proxy.pipeline.listRules(),
+    interceptAllC2s: s.proxy.pipeline.getInterceptAll('c2s'),
+    interceptAllS2c: s.proxy.pipeline.getInterceptAll('s2c'),
+    held: s.proxy.pipeline.listHeld(),
+    paused: s.proxy.pipeline.paused,
+    queue: s.proxy.pipeline.queueLengths(),
   });
 }
 
-proxy.pipeline.on('rulesChanged', pushInterceptState);
-proxy.pipeline.on('held', () => {
-  pushInterceptState();
-});
-proxy.pipeline.on('released', () => {
-  mainWindow?.webContents.send('intercept:released');
-  pushInterceptState();
-});
-proxy.pipeline.on('pausedChanged', () => {
-  mainWindow?.webContents.send('proxy:pausedChanged', { paused: proxy.pipeline.paused });
-  pushInterceptState();
-});
-proxy.pipeline.on('queueChanged', () => {
-  pushInterceptState();
-});
-
 // ——— MCP client (SDK) ———————————————————————————————————————————
 
-mcpClient.on('connected', (info) => {
-  mainWindow?.webContents.send('client:connected', info);
-});
-mcpClient.on('closed', () => {
-  mainWindow?.webContents.send('client:closed');
-});
-mcpClient.on('error', (err) => {
-  // "Received a response for an unknown message ID: {huge payload}" —
-  // a response arriving AFTER its request expired (e.g. held in
-  // pause/hold longer than the client's timeout). Translated short:
-  // the full payload is already visible as an s2c entry in the log.
-  const raw = err instanceof Error ? err.message : String(err);
-  const message = raw.startsWith('Received a response for an unknown message ID')
-    ? 'Orphan response — the request expired while paused/held and the server replied afterwards. The payload is in the log.'
-    : raw;
-  mainWindow?.webContents.send('client:error', { message });
-});
-
-// ——— Session helpers ———————————————————————————————————————————
-
-/** Connects the SDK client to the proxy (handshake). Logs the result. */
-async function connectClientToProxy(): Promise<void> {
+/** Connects the session's SDK client to its proxy (handshake). Logs the result. */
+async function connectClientToProxy(s: Session): Promise<void> {
   try {
-    await mcpClient.connectToProxy(proxy.deliveredWires(), {
+    await s.client.connectToProxy(s.proxy.deliveredWires(), {
       name: 'mcp-inspector-client',
       version: '0.1.0',
     });
-    const info = mcpClient.getServerInfo();
-    pushLifecycleEntry('info', `client connected: server "${info.name}" v${info.version} — handshake complete`);
+    const info = s.client.getServerInfo();
+    pushLifecycleEntry(s, 'info', `client connected: server "${info.name}" v${info.version} — handshake complete`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    pushLifecycleEntry('error', `client connect failed: ${msg}`);
-    mainWindow?.webContents.send('client:error', { message: msg });
+    pushLifecycleEntry(s, 'error', `client connect failed: ${msg}`);
+    mainWindow?.webContents.send('client:error', { serverId: s.id, message: msg });
   }
 }
 
 // ——— IPC ————————————————————————————————————————————————————————————
 
-ipcMain.handle('proxy:start', async (_evt, config: ServerConfig) => {
+ipcMain.handle('proxy:start', async (_evt, args: { serverId: string; name: string; config: ServerConfig }) => {
   try {
-    // stop any previous session (if there was one)
-    if (proxy.running) {
-      await proxy.stop();
+    const { serverId, name, config } = args;
+    // Replacing an existing session for this server: tear it down first.
+    if (sessions.has(serverId)) {
+      await closeSession(serverId);
     }
-    if (mcpClient.connected) {
-      await mcpClient.stop();
-    }
-
-    sessionConfig = config;
-    sessionEntries.length = 0;
-    proxy.pipeline.clearCorrelation();
-    proxy.pipeline.resetPause();
-
-    // spawn the server
-    proxy.start(config);
-    pushLifecycleEntry('info', `server spawned: ${config.command} ${(config.args ?? []).join(' ')}`);
+    const s = createSession(serverId, name, config);
+    s.proxy.start(config);
+    pushLifecycleEntry(s, 'info', `server spawned: ${config.command} ${(config.args ?? []).join(' ')}`);
 
     // connect the real MCP client (initialize → initialized handshake)
     if (config.connectClient !== false) {
-      await connectClientToProxy();
+      await connectClientToProxy(s);
     }
-
-    return { ok: true, running: proxy.running };
+    pushSessionState();
+    return { ok: true, running: s.proxy.running };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, running: false, error: msg };
   }
 });
 
-ipcMain.handle('proxy:stop', async () => {
-  await proxy.pipeline.flushAll();
-  if (mcpClient.connected) {
-    await mcpClient.stop();
-  }
-  await proxy.stop();
+ipcMain.handle('proxy:stop', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
+  await s.proxy.pipeline.flushAll();
+  if (s.client.connected) await s.client.stop();
+  await s.proxy.stop();
   return { ok: true };
 });
 
 /** MITM pause: freezes ALL traffic without touching the subprocess. The
- * server stays alive — messages are queued in the pipeline and flow on resume. */
-ipcMain.handle('proxy:pause', async () => {
-  proxy.pipeline.pause();
-  pushInterceptState();
+ *  server stays alive — messages are queued in the pipeline and flow on resume. */
+ipcMain.handle('proxy:pause', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
+  s.proxy.pipeline.pause();
+  pushInterceptState(s);
+  pushSessionState();
   return { ok: true, paused: true };
 });
 
 /** Resumes frozen traffic: releases the FIFO queue through the pipeline. */
-ipcMain.handle('proxy:resume', async () => {
-  proxy.pipeline.resume();
-  pushInterceptState();
+ipcMain.handle('proxy:resume', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
+  s.proxy.pipeline.resume();
+  pushInterceptState(s);
+  pushSessionState();
   return { ok: true, paused: false };
 });
 
 /** Restart: stop + start with the same config, without clearing the logged session. */
-ipcMain.handle('proxy:restart', async () => {
-  if (!sessionConfig) return { ok: false, error: 'no session' };
-  const config = sessionConfig;
+ipcMain.handle('proxy:restart', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
+  const config = s.config;
   try {
-    await proxy.pipeline.flushAll();
-    if (proxy.running) {
-      await proxy.stop();
-    }
-    if (mcpClient.connected) {
-      await mcpClient.stop();
-    }
-    proxy.pipeline.clearCorrelation();
-    proxy.pipeline.resetPause();
-    proxy.start(config);
-    pushLifecycleEntry('info', `server restarted: ${config.command} ${(config.args ?? []).join(' ')}`);
+    await s.proxy.pipeline.flushAll();
+    if (s.proxy.running) await s.proxy.stop();
+    if (s.client.connected) await s.client.stop();
+    s.proxy.pipeline.clearCorrelation();
+    s.proxy.pipeline.resetPause();
+    s.proxy.start(config);
+    pushLifecycleEntry(s, 'info', `server restarted: ${config.command} ${(config.args ?? []).join(' ')}`);
     if (config.connectClient !== false) {
-      await connectClientToProxy();
+      await connectClientToProxy(s);
     }
-    return { ok: true, running: proxy.running };
+    pushSessionState();
+    return { ok: true, running: s.proxy.running };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: msg };
@@ -362,27 +424,31 @@ ipcMain.handle('proxy:restart', async () => {
 });
 
 /** Immediate kill of the subprocess (SIGKILL — no grace period). */
-ipcMain.handle('proxy:kill', async () => {
-  await proxy.pipeline.flushAll();
-  proxy.kill();
+ipcMain.handle('proxy:kill', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
+  await s.proxy.pipeline.flushAll();
+  s.proxy.kill();
   return { ok: true };
 });
 
 // Raw send (the inspector as a manual client)
-ipcMain.handle('proxy:write', async (_evt, msg: JsonRpcMessage) => {
-  const ok = proxy.writeClientMessage(msg);
+ipcMain.handle('proxy:write', async (_evt, args: { serverId: string; msg: JsonRpcMessage }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  const ok = s.proxy.writeClientMessage(args.msg);
   return { ok };
 });
 
 // MCP client restart (connection reset): disconnect + reconnect to the
 // proxy (initialize → initialized handshake again). The server is NOT touched.
-ipcMain.handle('client:restart', async () => {
+ipcMain.handle('client:restart', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
   try {
-    if (!proxy.running) return { ok: false, error: 'server not running' };
-    if (mcpClient.connected) {
-      await mcpClient.stop();
-    }
-    await connectClientToProxy();
+    if (!s.proxy.running) return { ok: false, error: 'server not running' };
+    if (s.client.connected) await s.client.stop();
+    await connectClientToProxy(s);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -394,9 +460,11 @@ ipcMain.handle('client:restart', async () => {
 ipcMain.handle('app:getVersion', () => app.getVersion());
 
 // MCP request via the real SDK client
-ipcMain.handle('client:request', async (_evt, args: { method: string; params?: unknown }) => {
+ipcMain.handle('client:request', async (_evt, args: { serverId: string; method: string; params?: unknown }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
   try {
-    const result = await mcpClient.request(args.method, args.params);
+    const result = await s.client.request(args.method, args.params);
     return { ok: true, result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -405,9 +473,11 @@ ipcMain.handle('client:request', async (_evt, args: { method: string; params?: u
 });
 
 // MCP notification via the real SDK client
-ipcMain.handle('client:notify', async (_evt, args: { method: string; params?: unknown }) => {
+ipcMain.handle('client:notify', async (_evt, args: { serverId: string; method: string; params?: unknown }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
   try {
-    await mcpClient.notify(args.method, args.params);
+    await s.client.notify(args.method, args.params);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -416,62 +486,92 @@ ipcMain.handle('client:notify', async (_evt, args: { method: string; params?: un
 });
 
 // Client status
-ipcMain.handle('client:status', async () => {
+ipcMain.handle('client:status', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { connected: false, server: null };
   return {
-    connected: mcpClient.connected,
-    server: mcpClient.connected ? mcpClient.getServerInfo() : null,
+    connected: s.client.connected,
+    server: s.client.connected ? s.client.getServerInfo() : null,
   };
 });
 
-ipcMain.handle('proxy:status', async () => {
-  return { running: proxy.running, count: sessionEntries.length };
+ipcMain.handle('proxy:status', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { running: false, count: 0 };
+  return { running: s.proxy.running, count: s.entries.length };
 });
 
-// ——— Interception IPC ——————————————————————————————————————————
+// ——— Sessions ————————————————————————————————————————————————————
 
-ipcMain.handle('intercept:list', async () => {
+ipcMain.handle('session:list', async () => sessionSnapshot());
+
+ipcMain.handle('session:close', async (_evt, args: { serverId: string }) => {
+  await closeSession(args.serverId);
+  return { ok: true };
+});
+
+// ——— Interception IPC (per session) ————————————————————————————
+
+ipcMain.handle('intercept:list', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { rules: [], interceptAllC2s: false, interceptAllS2c: false, held: [], paused: false, queue: { c2s: 0, s2c: 0 } };
   return {
-    rules: proxy.pipeline.listRules(),
-    interceptAllC2s: proxy.pipeline.getInterceptAll('c2s'),
-    interceptAllS2c: proxy.pipeline.getInterceptAll('s2c'),
-    held: proxy.pipeline.listHeld(),
-    paused: proxy.pipeline.paused,
-    queue: proxy.pipeline.queueLengths(),
+    serverId: s.id,
+    rules: s.proxy.pipeline.listRules(),
+    interceptAllC2s: s.proxy.pipeline.getInterceptAll('c2s'),
+    interceptAllS2c: s.proxy.pipeline.getInterceptAll('s2c'),
+    held: s.proxy.pipeline.listHeld(),
+    paused: s.proxy.pipeline.paused,
+    queue: s.proxy.pipeline.queueLengths(),
   };
 });
 
-ipcMain.handle('intercept:addRule', async (_evt, args: { dir: 'c2s' | 's2c'; method: string; simulation?: SimulationConfig }) => {
-  const rule = proxy.pipeline.addRule(args.dir, args.method, args.simulation);
+ipcMain.handle('intercept:addRule', async (_evt, args: { serverId: string; dir: 'c2s' | 's2c'; method: string; simulation?: SimulationConfig }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  const rule = s.proxy.pipeline.addRule(args.dir, args.method, args.simulation);
   return { ok: true, rule };
 });
 
-ipcMain.handle('intercept:removeRule', async (_evt, args: { id: string }) => {
-  proxy.pipeline.removeRule(args.id);
+ipcMain.handle('intercept:removeRule', async (_evt, args: { serverId: string; id: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  s.proxy.pipeline.removeRule(args.id);
   return { ok: true };
 });
 
-ipcMain.handle('intercept:toggleRule', async (_evt, args: { id: string; enabled: boolean }) => {
-  proxy.pipeline.toggleRule(args.id, args.enabled);
+ipcMain.handle('intercept:toggleRule', async (_evt, args: { serverId: string; id: string; enabled: boolean }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  s.proxy.pipeline.toggleRule(args.id, args.enabled);
   return { ok: true };
 });
 
-ipcMain.handle('intercept:setRuleSimulation', async (_evt, args: { id: string; simulation: SimulationConfig | null }) => {
-  proxy.pipeline.setRuleSimulation(args.id, args.simulation);
+ipcMain.handle('intercept:setRuleSimulation', async (_evt, args: { serverId: string; id: string; simulation: SimulationConfig | null }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  s.proxy.pipeline.setRuleSimulation(args.id, args.simulation);
   return { ok: true };
 });
 
-ipcMain.handle('intercept:setInterceptAll', async (_evt, args: { dir: 'c2s' | 's2c'; on: boolean }) => {
-  proxy.pipeline.setInterceptAll(args.dir, args.on);
+ipcMain.handle('intercept:setInterceptAll', async (_evt, args: { serverId: string; dir: 'c2s' | 's2c'; on: boolean }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  s.proxy.pipeline.setInterceptAll(args.dir, args.on);
   return { ok: true };
 });
 
-ipcMain.handle('intercept:resolve', async (_evt, args: { id: string; resolution: HoldResolution }) => {
-  const ok = proxy.pipeline.resolveHold(args.id, args.resolution);
+ipcMain.handle('intercept:resolve', async (_evt, args: { serverId: string; id: string; resolution: HoldResolution }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  const ok = s.proxy.pipeline.resolveHold(args.id, args.resolution);
   return { ok };
 });
 
-ipcMain.handle('intercept:clear', async () => {
-  await proxy.pipeline.flushAll();
+ipcMain.handle('intercept:clear', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false };
+  await s.proxy.pipeline.flushAll();
   return { ok: true };
 });
 
@@ -518,13 +618,14 @@ ipcMain.handle('clients:save', async (_evt, clients: SavedClient[]) => {
   return { ok: true };
 });
 
-ipcMain.handle('session:export', async () => {
-  if (!sessionConfig) return { ok: false, error: 'no session' };
+ipcMain.handle('session:export', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
   const sess: SessionExport = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    config: sessionConfig,
-    entries: sessionEntries,
+    config: s.config,
+    entries: s.entries,
   };
   const win = mainWindow!;
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
@@ -537,7 +638,9 @@ ipcMain.handle('session:export', async () => {
   return { ok: true, filePath };
 });
 
-ipcMain.handle('session:import', async () => {
+ipcMain.handle('session:import', async (_evt, args: { serverId: string }) => {
+  const s = sessions.get(args.serverId);
+  if (!s) return { ok: false, error: 'no session' };
   const win = mainWindow!;
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Import session',
@@ -549,9 +652,10 @@ ipcMain.handle('session:import', async () => {
   const text = await fs.readFile(filePath, 'utf8');
   const sess = JSON.parse(text) as SessionExport;
   if (sess.version !== 1) return { ok: false, error: 'unsupported version' };
-  sessionConfig = sess.config;
-  sessionEntries.length = 0;
-  sessionEntries.push(...sess.entries);
+  // Imported entries become part of the target session's log.
+  for (const e of sess.entries) e.serverId = s.id;
+  s.entries.length = 0;
+  s.entries.push(...sess.entries);
   // Replay to the renderer
   for (const e of sess.entries) mainWindow?.webContents.send('proxy:entry', e);
   return { ok: true, count: sess.entries.length };
@@ -567,7 +671,12 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  Promise.all([proxy.pipeline.flushAll(), mcpClient.stop(), proxy.stop()]).finally(() => {
+  const teardown = Array.from(sessions.values()).map(async (s) => {
+    await s.proxy.pipeline.flushAll();
+    if (s.client.connected) await s.client.stop();
+    await s.proxy.stop();
+  });
+  Promise.all(teardown).finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });
 });

@@ -967,3 +967,63 @@ input, textarea, select { font-family: inherit; }
 .jump-latest .jump-latest-btn:hover {
   background: #79b8ff;
 }
+
+/* ——— Session tabs (multi-server, M1) ————————————————————— */
+.session-tabs {
+  display: flex;
+  gap: var(--sp-1, 4px);
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, #21262d);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.session-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #21262d);
+  border-radius: var(--r-sm, 6px);
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.session-tab:hover { background: rgba(88, 166, 255, 0.08); }
+.session-tab.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+}
+.tab-dot { font-size: 9px; line-height: 1; }
+.tab-dot.live { color: var(--success); }
+.tab-dot.stopped { color: var(--text-dim); }
+.tab-dot.paused { color: var(--warning); font-size: 10px; }
+.tab-name { font-weight: 600; }
+.tab-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  border: 1px solid var(--border, #21262d);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.tab-queued {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--warning);
+}
+.tab-close {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.tab-close:hover { color: var(--error); }

@@ -77,6 +77,8 @@ export interface LogEntry {
   dropped?: boolean;
   /** Simulation applied by a rule (fault injection / auto-mock / throttle). */
   simulated?: 'fault' | 'mock' | 'throttle';
+  /** Session (server) this entry belongs to. Undefined on legacy/imported entries. */
+  serverId?: string;
 }
 
 /** Compact validation result against the MCP spec (via the SDK's zod schemas). */
@@ -203,3 +205,22 @@ export type HoldResolution =
   | { action: 'send-modified'; msg: JsonRpcMessage }
   | { action: 'drop' }
   | { action: 'respond'; msg: JsonRpcMessage };
+
+/**
+ * Live state of a proxy session, pushed to the renderer (multi-server, M1).
+ * One entry per started server — stdio today, http in Phase 8.
+ */
+export interface SessionInfo {
+  /** The SavedServer id this session runs. */
+  serverId: string;
+  /** Display name of the server. */
+  name: string;
+  /** Transport kind (stdio today; 'http' lands with Phase 8). */
+  kind: 'stdio' | 'http';
+  /** true while the proxy is capturing. */
+  running: boolean;
+  /** true while the traffic is frozen (MITM pause). */
+  paused: boolean;
+  /** Number of queued messages while paused. */
+  queued: { c2s: number; s2c: number };
+}
