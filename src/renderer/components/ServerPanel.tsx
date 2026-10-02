@@ -7,12 +7,19 @@ interface Props {
   servers: SavedServer[];
   selectedId: string | null;
   config: ServerConfig;
+  /** Multi-select: ids checked for group start (Ctrl+Click / checkbox). */
+  checkedIds?: string[];
   onSelect: (id: string) => void;
+  /** Toggle a server in the multi-select set. */
+  onToggleChecked?: (id: string) => void;
   onChange: (c: ServerConfig) => void;
   onAdd: (name: string, config: ServerConfig, description?: string) => void;
   onUpdate: (id: string, name: string, config: ServerConfig, description?: string) => void;
   onDelete: (id: string) => void;
+  /** true if the ACTIVE session's server is running. */
   running: boolean;
+  /** Multi-server (M1): ids of ALL running sessions (for per-card badges). */
+  runningIds?: string[];
   onStart: () => void;
   /** Restart the subprocess with the same config (Phase 5). */
   onRestart: () => void;
@@ -33,12 +40,15 @@ export default function ServerPanel(props: Props): React.ReactElement {
     servers,
     selectedId,
     config,
+    checkedIds,
     onSelect,
+    onToggleChecked,
     onChange,
     onAdd,
     onUpdate,
     onDelete,
     running,
+    runningIds = [],
     onStart,
     onRestart,
     onKill,
@@ -133,24 +143,32 @@ export default function ServerPanel(props: Props): React.ReactElement {
         )}
       </div>
       <div className="panel-body">
-        {/* Card grid — visual selectors */}
+        {/* Card grid — visual selectors.
+            Multi-server (M1): cards are always clickable (selecting a running
+            server focuses its tab); per-server running shows its badge and
+            only locks that card's edit/delete. */}
         {editMode === 'none' && (
           <div className="card-grid-section">
             <div className="card-grid-label">Available servers</div>
             <div className="card-grid">
-              {servers.map((s) => (
-                <ServerCard
-                  key={s.id}
-                  server={s}
-                  selected={s.id === selectedId}
-                  running={running && s.id === selectedId}
-                  disabled={running}
-                  onSelect={() => onSelect(s.id)}
-                  onEdit={() => startEdit(s.id)}
-                  onDelete={() => handleDelete(s.id)}
-                />
-              ))}
-              <button className="card card-add" onClick={startAdd} disabled={running} title="Add a custom server">
+              {servers.map((s) => {
+                const isRunning = runningIds.includes(s.id);
+                return (
+                  <ServerCard
+                    key={s.id}
+                    server={s}
+                    selected={s.id === selectedId}
+                    checked={checkedIds?.includes(s.id) ?? false}
+                    running={isRunning}
+                    disabled={isRunning}
+                    onSelect={() => onSelect(s.id)}
+                    onToggleChecked={onToggleChecked ? () => onToggleChecked(s.id) : undefined}
+                    onEdit={() => startEdit(s.id)}
+                    onDelete={() => handleDelete(s.id)}
+                  />
+                );
+              })}
+              <button className="card card-add" onClick={startAdd} title="Add a custom server">
                 <span className="card-icon">＋</span>
                 <span className="card-name">Add</span>
               </button>
@@ -266,21 +284,28 @@ export default function ServerPanel(props: Props): React.ReactElement {
           </div>
         )}
 
-        {/* Start/Pause/Kill — process manager (Phase 5, feature 1c).
-            Server reset (↻) lives in the panel-header; Stop was removed:
-            Start already stops the previous session and ☠ Kill remains as the hard stop. */}
+        {/* Process manager — per-session gating (multi-server, M1).
+            Start is ALWAYS available: it starts the checked group or the
+            selected server (focuses its tab). Pause/Resume/Kill act on the
+            ACTIVE session only. ↻ Reset lives in the panel-header. */}
         {editMode === 'none' && (
           <div className="action-row" style={{ marginTop: 12 }}>
-            {!running ? (
-              <button className="btn primary" onClick={onStart} disabled={!selected} title="Start the MCP server">▶ Start</button>
-            ) : (
+            <button
+              className="btn primary"
+              onClick={onStart}
+              disabled={!selected && (checkedIds?.length ?? 0) === 0}
+              title="Start the selected server (or every checked card)"
+            >
+              {running && selected && (checkedIds?.length ?? 0) === 0 ? '↻ Start again' : '▶ Start'}
+            </button>
+            {running && (
               <>
                 {paused ? (
                   <button className="btn primary" onClick={onResume} title="Resume frozen traffic — releases the queue in order (FIFO)">▶ Resume</button>
                 ) : (
-                  <button className="btn warning" onClick={onPause} title="Pause traffic (MITM) — the server stays alive, messages are queued">⏸ Pause</button>
+                  <button className="btn warning" onClick={onPause} title="Pause traffic (MITM) of the active session — the server stays alive, messages are queued">⏸ Pause</button>
                 )}
-                <button className="btn danger" onClick={onKill} title="Kill immediately (SIGKILL, no grace period)">☠ Kill</button>
+                <button className="btn danger" onClick={onKill} title="Kill the active session's server immediately (SIGKILL, no grace period)">☠ Kill</button>
               </>
             )}
           </div>

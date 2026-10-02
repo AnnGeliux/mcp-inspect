@@ -5,9 +5,13 @@ import { truncateMiddle, serverTypeBadge } from '../utils/format';
 interface Props {
   server: SavedServer;
   selected: boolean;
+  /** Multi-select: the card is checked (queued for group start). */
+  checked?: boolean;
   running: boolean;
   disabled?: boolean;
   onSelect: () => void;
+  /** Multi-select toggle (Ctrl+Click or checkbox). */
+  onToggleChecked?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -45,9 +49,11 @@ function serverDesc(server: SavedServer): string {
 export default function ServerCard({
   server,
   selected,
+  checked,
   running,
   disabled,
   onSelect,
+  onToggleChecked,
   onEdit,
   onDelete,
 }: Props): React.ReactElement {
@@ -60,12 +66,40 @@ export default function ServerCard({
 
   const typeBadge = serverTypeBadge(server.config);
 
+  // Click semantics:
+  // - Ctrl+Click anywhere on the card → toggle the multi-select check.
+  // - Plain click → exclusive select (single target).
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (disabled) return;
+    if (e.ctrlKey && onToggleChecked) {
+      e.preventDefault();
+      onToggleChecked();
+      return;
+    }
+    onSelect();
+  };
+
   return (
     <div
-      className={`card ${selected ? 'card-selected' : ''} ${disabled ? 'card-disabled' : ''}`}
-      onClick={() => !disabled && onSelect()}
+      className={`card ${selected ? 'card-selected' : ''} ${checked ? 'card-checked' : ''} ${disabled ? 'card-disabled' : ''}`}
+      onClick={handleCardClick}
       title={serverDesc(server)}
     >
+      {/* Multi-select checkbox (top-right corner of the card) */}
+      {onToggleChecked && (
+        <input
+          type="checkbox"
+          className="card-check"
+          title="Check to include in the group start (Ctrl+Click toggles too)"
+          checked={!!checked}
+          disabled={disabled}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleChecked();
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      )}
       <div className="card-top">
         <span className="card-icon">{serverIcon(server)}</span>
         <div className="card-info">

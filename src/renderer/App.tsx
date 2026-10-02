@@ -97,6 +97,8 @@ export default function App(): React.ReactElement {
   const [clientConnectedMap, setClientConnectedMap] = useState<Record<string, boolean>>({});
   const [serverInfoMap, setServerInfoMap] = useState<Record<string, { name?: string; version?: string; capabilities?: unknown } | null>>({});
   const [exitInfoMap, setExitInfoMap] = useState<Record<string, { code: number | null; signal: string | null } | undefined>>({});
+  // Multi-select for group start (Ctrl+Click / checkbox on the cards).
+  const [checkedServerIds, setCheckedServerIds] = useState<string[]>([]);
   const [lastToolResult, setLastToolResult] = useState<LogEntry | null>(null);
   const [statusMsg, setStatusMsg] = useState<string>('Ready. Select a server and a client to start.');
   // App version (semver MAJOR.MINOR.PATCH — package.json)
@@ -255,6 +257,13 @@ export default function App(): React.ReactElement {
     }
   }, [servers, showWizard, wizardStep]);
 
+  /** Multi-select toggle: Ctrl+Click or checkbox on a card. */
+  const handleToggleCheckedServer = useCallback((id: string) => {
+    setCheckedServerIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
+
   const handleAddServer = useCallback((name: string, newConfig: ServerConfig, description?: string) => {
     const id = `server-${Date.now()}`;
     const newServer: SavedServer = { id, name, description, config: newConfig };
@@ -290,6 +299,8 @@ export default function App(): React.ReactElement {
       void window.api.saveServers(updated);
       return updated;
     });
+    // Drop it from the multi-select group too.
+    setCheckedServerIds((prev) => prev.filter((x) => x !== id));
     // If a live session exists for the deleted server, tear it down.
     if (sessionList.some((s) => s.serverId === id)) {
       void window.api.sessionClose(id);
@@ -346,24 +357,50 @@ export default function App(): React.ReactElement {
   }, [selectedClientId]);
 
   // ——— Start / Stop (per session) ———
+  /** Starts one server session (used by single and group start). */
+  const startOne = useCallback(async (server: SavedServer, focus: boolean) => {
+    setSessionEntries((prev) => ({ ...prev, [server.id]: [] }));
+    setExitInfoMap((prev) => ({ ...prev, [server.id]: undefined }));
+    if (focus) {
+      setSelectedServerId(server.id);
+      setConfig(server.config);
+    }
+    const r = await window.api.start(server.id, server.name, server.config);
+    if (!r.ok && focus) {
+      setStatusMsg(`Failed to start: ${r.error ?? 'unknown'}`);
+    }
+    return r.ok;
+  }, []);
+
   const onStart = useCallback(async () => {
+    // Group start: every checked card (Ctrl+Click / checkbox), in order.
+    const group = servers.filter((s) => checkedServerIds.includes(s.id));
+    if (group.length > 0) {
+      setLastToolResult(null);
+      setStatusMsg(`Starting ${group.length} servers…`);
+      let okCount = 0;
+      for (let i = 0; i < group.length; i++) {
+        // Sequential: spawn + handshake before the next one.
+        const ok = await startOne(group[i]!, i === group.length - 1);
+        if (ok) okCount++;
+      }
+      setStatusMsg(
+        okCount === group.length
+          ? `${okCount} servers running — one tab per session.`
+          : `Started ${okCount}/${group.length} — check the status message for failures.`,
+      );
+      return;
+    }
+    // Single start: the selected server.
     const server = servers.find((s) => s.id === selectedServerId);
     if (!server) {
       setStatusMsg('Select a server first.');
       return;
     }
-    const targetConfig = server.config;
-    if (selectedServerId) {
-      setSessionEntries((prev) => ({ ...prev, [selectedServerId]: [] }));
-    }
-    setExitInfoMap((prev) => ({ ...prev, [server.id]: undefined }));
     setLastToolResult(null);
     setStatusMsg('Spawning server + client handshake…');
-    const r = await window.api.start(server.id, server.name, targetConfig);
-    if (!r.ok) {
-      setStatusMsg(`Failed to start: ${r.error ?? 'unknown'}`);
-    }
-  }, [servers, selectedServerId]);
+    await startOne(server, true);
+  }, [servers, checkedServerIds, selectedServerId, startOne]);
 
   // Restart the subprocess with the same config (Phase 5)
   const onRestart = useCallback(async () => {
@@ -418,18 +455,20 @@ export default function App(): React.ReactElement {
     setStatusMsg('Session closed — server stopped.');
   }, []);
 
-  // Auto-start when both server + client are selected (once)
+  // Auto-start the FIRST selection once (wizard-like convenience).
+  // Multi-server (M1): only fires on the initial selection — starting more
+  // servers is explicit (Start button / checked group).
   useEffect(() => {
     if (
       !autoStarted.current &&
       hasSelection &&
       config.args.length > 0 &&
-      !running
+      sessionList.length === 0
     ) {
       autoStarted.current = true;
       void onStart();
     }
-  }, [hasSelection, config, running, onStart]);
+  }, [hasSelection, config, sessionList, onStart]);
 
   // ——— Client → server interaction (active session) ———
   const doRequest = useCallback(async (method: string, params?: unknown, label?: string) => {
@@ -596,7 +635,10 @@ export default function App(): React.ReactElement {
           servers={servers}
           selectedId={selectedServerId}
           config={config}
+          checkedIds={checkedServerIds}
+          runningIds={sessionList.filter((s) => s.running).map((s) => s.serverId)}
           onSelect={handleSelectServer}
+          onToggleChecked={handleToggleCheckedServer}
           onChange={setConfig}
           onAdd={handleAddServer}
           onUpdate={handleUpdateServer}
