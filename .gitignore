@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-renderer/
 *.log
-.DS_Store.hermes/
+.DS_Store
+.hermes/
 research/
 design/
